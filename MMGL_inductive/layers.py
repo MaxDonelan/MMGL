@@ -91,9 +91,10 @@ class VariLengthInputLayer(nn.Module):
         temp_dim = 0
         bs = input_data.size(0)
         modal_num = len(self.dims)
-        q = torch.zeros(bs, modal_num, self.n_head * self.d_k).cuda()
-        k = torch.zeros(bs, modal_num, self.n_head * self.d_k).cuda()
-        v = torch.zeros(bs, modal_num, self.n_head * self.d_v).cuda()
+        device = input_data.device
+        q = torch.zeros(bs, modal_num, self.n_head * self.d_k, device=device)
+        k = torch.zeros(bs, modal_num, self.n_head * self.d_k, device=device)
+        v = torch.zeros(bs, modal_num, self.n_head * self.d_v, device=device)
         for i in range(modal_num):
             w_q = self.w_qs[i]
             w_k = self.w_ks[i]

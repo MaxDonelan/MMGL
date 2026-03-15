@@ -17,7 +17,7 @@ import matplotlib.cm
 import networkx as nx 
 from sklearn.metrics import confusion_matrix
 import dgl
-from dgl.dataloading import MultiLayerNeighborSampler, NodeDataLoader
+from dgl.dataloading import DataLoader, MultiLayerNeighborSampler
 import scipy.sparse as sp
 
 from network import *
@@ -193,15 +193,16 @@ class EvalHelper:
         else:
             idx = list(range(G.num_nodes()))
         sampler = MultiLayerNeighborSampler([5,10])
-        node_loader = NodeDataLoader(G,
-                                    torch.tensor(idx).to(dev),
-                                    sampler,
-                                    batch_size=1000,
-                                    shuffle=False,
-                                    drop_last=False)
+        node_loader = DataLoader(G,
+                                torch.tensor(idx).to(dev),
+                                sampler,
+                                batch_size=1000,
+                                shuffle=False,
+                                drop_last=False,
+                                num_workers=0)
         num_batches, size = len(node_loader), len(node_loader.dataset)
         for input_nodes, output_nodes, blocks in node_loader:
-            blocks = [b.to(torch.device('cuda')) for b in blocks]
+            blocks = [b.to(dev) for b in blocks]
             input_feat = blocks[0].srcdata['feat']
             label = blocks[-1].dstdata['label']
             prob = self.MessagePassing(blocks, input_feat)

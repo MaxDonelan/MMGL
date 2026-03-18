@@ -23,6 +23,9 @@ from utils import *
 from model import *
 import dgl
 
+# Suppress a pointless warning regarding not enabling CPU affinity, which does nothing for num_workers=0
+import warnings
+warnings.filterwarnings('ignore', message='.*Dataloader CPU affinity opt is not enabled.*')
 
 class RedirectStdStreams:
     def __init__(self, stdout=None, stderr=None):
@@ -92,6 +95,9 @@ def train_and_eval(datadir, datname, hyperpm):
     elif datname == 'ABIDE':
         hyperpm.nclass = 2
         hyperpm.nmodal = 4
+    elif datname == "RADFUSION":
+        hyperpm.nclass = 2
+        hyperpm.nmodal = 2
     #np.random.shuffle(data)
     
     use_cuda = torch.cuda.is_available()

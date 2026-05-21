@@ -9,6 +9,7 @@ from torch import optim
 from torch.utils.data import DataLoader, Dataset
 import torch.nn.functional as F
 from sklearn.model_selection import StratifiedKFold
+from sklearn.metrics import roc_auc_score
 from labeling import normalize_slice
 
 
@@ -55,12 +56,14 @@ def plot_summaries(model_summaries: list[pd.DataFrame]) -> plt.Figure:
 
     metrics = [
         ("Train Acc", "Train Accuracy"),
-        ("Train Loss",     "Train Loss"),
-        ("Test Acc",  "Test Accuracy"),
-        ("Test Loss",      "Test Loss"),
+        ("Train Loss", "Train Loss"),
+        ("Train AUC", "Train AUC"),
+        ("Test Acc", "Test Accuracy"),
+        ("Test Loss", "Test Loss"),
+        ("Test AUC", "Test AUC")
     ]
 
-    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+    fig, axes = plt.subplots(2, 3, figsize=(18, 8))
     axes = axes.flatten()
 
     for ax, (col, title) in zip(axes, metrics):
@@ -72,7 +75,7 @@ def plot_summaries(model_summaries: list[pd.DataFrame]) -> plt.Figure:
         ax.set_xlabel("Epoch")
         ax.set_xticks(range(n_epochs))
         ax.set_ylabel(title)
-        legend_loc = "lower right" if ax in axes[::2] else "upper right"
+        legend_loc = "upper right" if ax in axes[[1, 4]] else "lower right"
         ax.legend(loc=legend_loc, fontsize=5)
         ax.grid(True, linestyle="--", alpha=0.25)
 
@@ -107,18 +110,19 @@ def train_lung_detector(samples_path: str, key_path: str) -> tuple[list[pd.DataF
         train_loader = DataLoader(train_sample, batch_size=batch_size)
         test_loader = DataLoader(test_sample, batch_size=batch_size)
 
+        # move this to a separate training function so that we can train the model without CV if we want?
         model = CNN().to(dev)
         criterion = nn.CrossEntropyLoss()
         optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum)
 
-        model_summary = pd.DataFrame({"Train Acc": [], "Train Loss": [], "Test Acc": [], "Test Loss": []})
+        model_summary = pd.DataFrame({"Train Acc": [], "Train Loss": [], "Train AUC": [], "Test Acc": [], "Test Loss": [], "Test AUC": []})
 
         print(f"\n\n\n---- Cross Validation Fold {i+1} ----\n")
-        print("| Epoch | Train Acc. | Train Loss | Test Acc. | Test Loss |")
+        print("| Epoch | Train Acc. | Train Loss | Train AUC | Test Acc. | Test Loss | Test AUC |")
 
         for epoch in range(epochs):
-            train_loss, test_loss = 0, 0
-            train_pred, test_pred, train_actual, test_actual = [], [], [], []
+            train_pred, train_actual, train_prob, train_loss = [], [], [], 0
+            test_pred, test_actual, test_prob, test_loss = [], [], [], 0
             n_train_batches, n_test_batches = len(train_loader), len(test_loader)
 
             model.train()
@@ -130,7 +134,8 @@ def train_lung_detector(samples_path: str, key_path: str) -> tuple[list[pd.DataF
                 loss.backward()
                 optimizer.step()
 
-                train_pred.extend(torch.argmax(output, 1).cpu().numpy())
+                train_pred.extend(torch.argmax(output, dim=1).cpu().numpy())
+                train_prob.extend(torch.softmax(output, dim=1)[:, 1].cpu().detach().numpy())
                 train_actual.extend(train_labels.cpu().numpy())
                 train_loss += loss.item()
 
@@ -140,6 +145,7 @@ def train_lung_detector(samples_path: str, key_path: str) -> tuple[list[pd.DataF
                     test_data, test_labels = test_data.to(dev), test_labels.to(dev)
                     output = model(test_data)
                     test_pred.extend(torch.argmax(output, dim=1).cpu().numpy())
+                    test_prob.extend(torch.softmax(output, dim=1)[:, 1].cpu().detach().numpy())
                     test_actual.extend(test_labels.cpu().numpy())
                     test_loss += criterion(output, test_labels).item()
             
@@ -147,10 +153,12 @@ def train_lung_detector(samples_path: str, key_path: str) -> tuple[list[pd.DataF
             test_acc = np.mean(np.array(test_pred) == np.array(test_actual))
             train_loss = train_loss / n_train_batches
             test_loss = test_loss / n_test_batches
+            train_auc = roc_auc_score(train_actual, train_prob)
+            test_auc = roc_auc_score(test_actual, test_prob)
 
-            epoch_summary = pd.DataFrame({"Train Acc": [train_acc], "Train Loss": [train_loss], "Test Acc": [test_acc], "Test Loss": [test_loss]})
+            epoch_summary = pd.DataFrame({"Train Acc": [train_acc], "Train Loss": [train_loss], "Train AUC": [train_auc], "Test Acc": [test_acc], "Test Loss": [test_loss], "Test AUC": [test_auc]})
             model_summary = pd.concat([model_summary, epoch_summary], ignore_index=True)
-            print(f"|   {epoch+1}   |    {train_acc:.5f} |    {train_loss:.5f} |   {test_acc:.5f} |   {test_loss:.5f} |")
+            print(f"|   {epoch+1}   |    {train_acc:.5f} |    {train_loss:.5f} |   {train_auc:.5f} |   {test_acc:.5f} |   {test_loss:.5f} |  {test_auc:.5f} |")
 
         model_summaries.append(model_summary)
 

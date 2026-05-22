@@ -66,6 +66,7 @@ class SliceClassifier:
         self.model_summary = pd.DataFrame({"Train Acc": [], "Train Loss": [], "Train AUC": [], 
                                            "Test Acc": [], "Test Loss": [], "Test AUC": []})
     
+
     def fit(self, train_loader: DataLoader, test_loader: DataLoader, verbose: bool = True) -> tuple[pd.DataFrame, CNN]:
         """
         Fits the SliceClassifer given a training and test dataset.
@@ -136,6 +137,55 @@ class SliceClassifier:
 
         return self.model_summary, self.model
     
+
+    def get_class_probabilities(self, x: torch.Tensor) -> np.ndarray:
+        """
+        Obtain class probabilities for a new observation x.
+
+        Parameters
+        ----------
+        **x** : *torch.Tensor*
+
+        A new observation for which to calculate class probabilities.
+
+        Returns
+        -------
+        Class probabilites for x.
+        """
+        x = x.to(self.device)
+        self.model.eval()
+        with torch.no_grad():
+            return torch.softmax(self.model(x), dim=1).cpu().detach().numpy()
+
+
+    def predict(self, x: torch.Tensor | np.ndarray, cutoff: float = 0.5) -> np.ndarray:
+        """
+        Obtain model predictions either from a new observation or the 
+        class probabilities for a given observation.
+
+        Parameters
+        ----------
+        **x** : *torch.Tensor | np.ndarray*
+
+        Either a torch.Tensor containing a new observation or a ndarray of 
+        class probailities as returned by get_class_probabilities().
+
+        **cutoff** : *float, default 0.5*
+
+        An alternative cutoff to use for prediction. If not supplied defaults to 0.5.
+
+        Returns
+        -------
+        The positive or negative predictions for x.
+        """
+        if isinstance(x, torch.Tensor):
+            pred = self.get_class_probabilities(x)[:, 1]
+            return np.where(pred > cutoff, 1, 0) 
+        elif isinstance(x, np.ndarray):
+            return np.where(x[:, 1] > cutoff, 1, 0)
+        else:
+            raise TypeError
+
 
 def plot_summaries(model_summaries: list[pd.DataFrame]) -> plt.Figure:
     """

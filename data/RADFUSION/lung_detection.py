@@ -14,6 +14,9 @@ from labeling import normalize_slice
 
 
 class SliceSample(Dataset):
+    """
+    A Dataset class for the CT scan slices so that they can be passed into a DataLoader.
+    """
     def __init__(self, slices, key):
         super(Dataset, self).__init__()
         self.slices = slices
@@ -46,12 +49,108 @@ class CNN(nn.Module):
         x = F.relu(self.linear2(x))
         x = self.linear3(x)
         return x
+    
 
+class SliceClassifier:
+    """
+    A class to initial, fit, and store a CNN trained to classify CT scan slices.
+    """
+    def __init__(self, epochs: int, learning_rate: float, momentum: float, device: str):
+        self.epochs = epochs
+        self.learning_rate = learning_rate
+        self.momentum = momentum
+        self.device = device
+        self.model = CNN().to(self.device)
+        self.criterion = nn.CrossEntropyLoss()
+        self.optimizer = optim.SGD(self.model.parameters(), lr=self.learning_rate, momentum=self.momentum)
+        self.model_summary = pd.DataFrame({"Train Acc": [], "Train Loss": [], "Train AUC": [], 
+                                           "Test Acc": [], "Test Loss": [], "Test AUC": []})
+    
+    def fit(self, train_loader: DataLoader, test_loader: DataLoader, verbose: bool = True) -> tuple[pd.DataFrame, CNN]:
+        """
+        Fits the SliceClassifer given a training and test dataset.
 
-def train_CNN():
-    ...
+        Parameters
+        ----------
+        **train_loader** : *DataLoader*
+
+            A training set provided as a torch.utils.data.DataLoader constructed from a SliceSample.
+
+        **test_loader** : *DataLoader*
+
+            A test set provided as a torch.utils.data.DataLoader constructed from a SliceSample.
+
+        **verbose** : *bool, default True*
+        
+            Whether to print each row (epoch) of the model summary as it is computed.
+
+        Returns
+        -------
+        A tuple of a model summary DataFrame and the fitted model.
+        """
+        if verbose:
+            print("| Epoch | Train Acc. | Train Loss | Train AUC | Test Acc. | Test Loss | Test AUC |")
+
+        for epoch in range(self.epochs):
+            train_pred, train_actual, train_prob, train_loss = [], [], [], 0
+            test_pred, test_actual, test_prob, test_loss = [], [], [], 0
+            n_train_batches, n_test_batches = len(train_loader), len(test_loader)
+
+            self.model.train()
+            for _, (train_data, train_labels) in enumerate(train_loader):
+                train_data, train_labels = train_data.to(self.device), train_labels.to(self.device)
+                self.optimizer.zero_grad()
+                output = self.model(train_data)
+                loss = self.criterion(output, train_labels)
+                loss.backward()
+                self.optimizer.step()
+
+                # slowly collected predictions for the whole training data by adding each batch one-by-one
+                train_pred.extend(torch.argmax(output, dim=1).cpu().numpy())
+                train_prob.extend(torch.softmax(output, dim=1)[:, 1].cpu().detach().numpy()) # roc_auc_score() expects the probabilities of the "1" class
+                train_actual.extend(train_labels.cpu().numpy())
+                train_loss += loss.item()
+
+            self.model.eval()
+            with torch.no_grad():
+                for _, (test_data, test_labels) in enumerate(test_loader):
+                    test_data, test_labels = test_data.to(self.device), test_labels.to(self.device)
+                    output = self.model(test_data)
+                    test_pred.extend(torch.argmax(output, dim=1).cpu().numpy())
+                    test_prob.extend(torch.softmax(output, dim=1)[:, 1].cpu().detach().numpy())
+                    test_actual.extend(test_labels.cpu().numpy())
+                    test_loss += self.criterion(output, test_labels).item()
+            
+            train_acc = np.mean(np.array(train_pred) == np.array(train_actual))
+            test_acc = np.mean(np.array(test_pred) == np.array(test_actual))
+            train_loss = train_loss / n_train_batches
+            test_loss = test_loss / n_test_batches
+            train_auc = roc_auc_score(train_actual, train_prob)
+            test_auc = roc_auc_score(test_actual, test_prob)
+
+            epoch_summary = pd.DataFrame({"Train Acc": [train_acc], "Train Loss": [train_loss], "Train AUC": [train_auc], 
+                                          "Test Acc": [test_acc], "Test Loss": [test_loss], "Test AUC": [test_auc]})
+            self.model_summary = pd.concat([self.model_summary, epoch_summary], ignore_index=True)
+            if verbose:
+                print(f"|   {epoch+1}   |    {train_acc:.5f} |    {train_loss:.5f} |   {train_auc:.5f} |   {test_acc:.5f} |   {test_loss:.5f} |  {test_auc:.5f} |")
+
+        return self.model_summary, self.model
+    
 
 def plot_summaries(model_summaries: list[pd.DataFrame]) -> plt.Figure:
+    """
+    Create the model summary plots.
+
+    Parameters
+    ----------
+    **model_summaries** : *list[pd.DataFrame]*
+
+        The list of model summaries, each as it is generated by SliceClassifier.fit()
+
+    Returns
+    -------
+    A 2x3 grid of plots of all the model summaries per epoch for training and test data.
+    """
     labels = [f"CV Fold {i+1}" for i in range(len(model_summaries))]
 
     metrics = [
@@ -84,15 +183,31 @@ def plot_summaries(model_summaries: list[pd.DataFrame]) -> plt.Figure:
     return fig
 
 
-def train_lung_detector(samples_path: str, key_path: str) -> tuple[list[pd.DataFrame], CNN]:
-    # read training data and key
+def cv_train_lung_detector(samples_path: str, labels_path: str) -> list[pd.DataFrame]:
+    """
+    Load the training data, normalize the slices, set the hyperparameters for the model, set up 10-fold cross validation,
+    and train one SliceClassifier model on each fold, saving the model summaries.
+
+    Parameters
+    ----------
+    **samples_path** : *str*
+
+    The file path to the sample data.
+
+    **labels_path** : *str*
+
+    The file path to the labels for the samples.
+
+    Returns
+    -------
+    A list of model summaries as returned by SliceClassifier().fit().
+    """
     samples = np.load(samples_path)
-    key = np.load(key_path)
+    labels = np.load(labels_path)
 
     for i in range(samples.shape[0]):
         samples[i, :, :] = normalize_slice(samples[i, :, :])
 
-    # create cross validation splits
     cv = StratifiedKFold(n_splits=10)
     n_samples = samples.shape[0]
 
@@ -103,81 +218,39 @@ def train_lung_detector(samples_path: str, key_path: str) -> tuple[list[pd.DataF
     model_summaries = []
     dev = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    for i, (train, test) in enumerate(cv.split(X=np.zeros(n_samples), y=key)):
-        train_sample  = SliceSample(samples[train, :, :], key[train])
-        test_sample = SliceSample(samples[test, :, :], key[test])
+    for i, (train, test) in enumerate(cv.split(X=np.zeros(n_samples), y=labels)):
+        train_sample  = SliceSample(samples[train, :, :], labels[train])
+        test_sample = SliceSample(samples[test, :, :], labels[test])
         
         train_loader = DataLoader(train_sample, batch_size=batch_size)
         test_loader = DataLoader(test_sample, batch_size=batch_size)
 
-        # move this to a separate training function so that we can train the model without CV if we want?
-        model = CNN().to(dev)
-        criterion = nn.CrossEntropyLoss()
-        optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum)
+        print(f"\n\n---- Cross Validation Fold {i+1} ----\n")
 
-        model_summary = pd.DataFrame({"Train Acc": [], "Train Loss": [], "Train AUC": [], "Test Acc": [], "Test Loss": [], "Test AUC": []})
-
-        print(f"\n\n\n---- Cross Validation Fold {i+1} ----\n")
-        print("| Epoch | Train Acc. | Train Loss | Train AUC | Test Acc. | Test Loss | Test AUC |")
-
-        for epoch in range(epochs):
-            train_pred, train_actual, train_prob, train_loss = [], [], [], 0
-            test_pred, test_actual, test_prob, test_loss = [], [], [], 0
-            n_train_batches, n_test_batches = len(train_loader), len(test_loader)
-
-            model.train()
-            for _, (train_data, train_labels) in enumerate(train_loader):
-                train_data, train_labels = train_data.to(dev), train_labels.to(dev)
-                optimizer.zero_grad()
-                output = model(train_data)
-                loss = criterion(output, train_labels)
-                loss.backward()
-                optimizer.step()
-
-                train_pred.extend(torch.argmax(output, dim=1).cpu().numpy())
-                train_prob.extend(torch.softmax(output, dim=1)[:, 1].cpu().detach().numpy())
-                train_actual.extend(train_labels.cpu().numpy())
-                train_loss += loss.item()
-
-            model.eval()
-            with torch.no_grad():
-                for _, (test_data, test_labels) in enumerate(test_loader):
-                    test_data, test_labels = test_data.to(dev), test_labels.to(dev)
-                    output = model(test_data)
-                    test_pred.extend(torch.argmax(output, dim=1).cpu().numpy())
-                    test_prob.extend(torch.softmax(output, dim=1)[:, 1].cpu().detach().numpy())
-                    test_actual.extend(test_labels.cpu().numpy())
-                    test_loss += criterion(output, test_labels).item()
-            
-            train_acc = np.mean(np.array(train_pred) == np.array(train_actual))
-            test_acc = np.mean(np.array(test_pred) == np.array(test_actual))
-            train_loss = train_loss / n_train_batches
-            test_loss = test_loss / n_test_batches
-            train_auc = roc_auc_score(train_actual, train_prob)
-            test_auc = roc_auc_score(test_actual, test_prob)
-
-            epoch_summary = pd.DataFrame({"Train Acc": [train_acc], "Train Loss": [train_loss], "Train AUC": [train_auc], "Test Acc": [test_acc], "Test Loss": [test_loss], "Test AUC": [test_auc]})
-            model_summary = pd.concat([model_summary, epoch_summary], ignore_index=True)
-            print(f"|   {epoch+1}   |    {train_acc:.5f} |    {train_loss:.5f} |   {train_auc:.5f} |   {test_acc:.5f} |   {test_loss:.5f} |  {test_auc:.5f} |")
+        model = SliceClassifier(epochs=epochs, learning_rate=learning_rate, momentum=momentum, device=dev)
+        model_summary, fitted_model = model.fit(train_loader=train_loader, test_loader=test_loader)
 
         model_summaries.append(model_summary)
+
+    return model_summaries
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--samples", type=str, help="The path of the file for the samples")
+    parser.add_argument("--labels", type=str, help="The path of the file for the response labels")
+    parser.add_argument("--seed", type=int, help="The random seed to use for all processes")
+
+    args = parser.parse_args()
+    samples_path = args.samples
+    labels_path = args.labels
+    seed = args.seed
+
+    if seed is not None:
+        random.seed(seed)
+
+    model_summaries = cv_train_lung_detector(samples_path, labels_path)
 
     fig = plot_summaries(model_summaries)
     plt.savefig("data/RADFUSION/model_summaries.png")
     plt.close(fig)
-
-    return model_summaries, model
-
-
-if __name__ == "__main__":
-    random.seed(42)
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--samples", type=str, help="The path of the file for the samples")
-    parser.add_argument("--key", type=str, help="The path of the file for the response key")
-
-    args = parser.parse_args()
-    samples_path = args.samples
-    key_path = args.key
-
-    train_lung_detector(samples_path, key_path)

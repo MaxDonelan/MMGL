@@ -53,7 +53,7 @@ class CNN(nn.Module):
 
 class SliceClassifier:
     """
-    A class to initial, fit, and store a CNN trained to classify CT scan slices.
+    A class to initialize, fit, and store a CNN trained to classify CT scan slices.
     """
     def __init__(self, epochs: int, learning_rate: float, momentum: float, device: str):
         self.epochs = epochs
@@ -136,6 +136,85 @@ class SliceClassifier:
                 print(f"|   {epoch+1}   |    {train_acc:.5f} |    {train_loss:.5f} |   {train_auc:.5f} |   {test_acc:.5f} |   {test_loss:.5f} |  {test_auc:.5f} |")
 
         return self.model_summary, self.model
+    
+
+    def best_fit(self, train_loader: DataLoader, test_loader: DataLoader, verbose: bool = True) -> tuple[pd.DataFrame, CNN]:
+        """
+        Fits the SliceClassifer given a training and test dataset, but yields the model from the epoch with the highest 
+        test AUC instead of the last epoch.
+
+        Parameters
+        ----------
+        **train_loader** : *DataLoader*
+
+            A training set provided as a torch.utils.data.DataLoader constructed from a SliceSample.
+
+        **test_loader** : *DataLoader*
+
+            A test set provided as a torch.utils.data.DataLoader constructed from a SliceSample.
+
+        **verbose** : *bool, default True*
+        
+            Whether to print each row (epoch) of the model summary as it is computed.
+
+        Returns
+        -------
+        A tuple of a model summary DataFrame and the best fitted model.
+        """
+        if verbose:
+            print("| Epoch | Train Acc. | Train Loss | Train AUC | Test Acc. | Test Loss | Test AUC |")
+
+        best_test_auc = 0
+        best_model = None
+
+        for epoch in range(self.epochs):
+            train_pred, train_actual, train_prob, train_loss = [], [], [], 0
+            test_pred, test_actual, test_prob, test_loss = [], [], [], 0
+            n_train_batches, n_test_batches = len(train_loader), len(test_loader)
+
+            self.model.train()
+            for _, (train_data, train_labels) in enumerate(train_loader):
+                train_data, train_labels = train_data.to(self.device), train_labels.to(self.device)
+                self.optimizer.zero_grad()
+                output = self.model(train_data)
+                loss = self.criterion(output, train_labels)
+                loss.backward()
+                self.optimizer.step()
+
+                # slowly collected predictions for the whole training data by adding each batch one-by-one
+                train_pred.extend(torch.argmax(output, dim=1).cpu().numpy())
+                train_prob.extend(torch.softmax(output, dim=1)[:, 1].cpu().detach().numpy()) # roc_auc_score() expects the probabilities of the "1" class
+                train_actual.extend(train_labels.cpu().numpy())
+                train_loss += loss.item()
+
+            self.model.eval()
+            with torch.no_grad():
+                for _, (test_data, test_labels) in enumerate(test_loader):
+                    test_data, test_labels = test_data.to(self.device), test_labels.to(self.device)
+                    output = self.model(test_data)
+                    test_pred.extend(torch.argmax(output, dim=1).cpu().numpy())
+                    test_prob.extend(torch.softmax(output, dim=1)[:, 1].cpu().detach().numpy())
+                    test_actual.extend(test_labels.cpu().numpy())
+                    test_loss += self.criterion(output, test_labels).item()
+            
+            train_acc = np.mean(np.array(train_pred) == np.array(train_actual))
+            test_acc = np.mean(np.array(test_pred) == np.array(test_actual))
+            train_loss = train_loss / n_train_batches
+            test_loss = test_loss / n_test_batches
+            train_auc = roc_auc_score(train_actual, train_prob)
+            test_auc = roc_auc_score(test_actual, test_prob)
+
+            if best_test_auc <= test_auc:
+                best_model = self.model
+                best_test_auc = test_auc
+
+            epoch_summary = pd.DataFrame({"Train Acc": [train_acc], "Train Loss": [train_loss], "Train AUC": [train_auc], 
+                                          "Test Acc": [test_acc], "Test Loss": [test_loss], "Test AUC": [test_auc]})
+            self.model_summary = pd.concat([self.model_summary, epoch_summary], ignore_index=True)
+            if verbose:
+                print(f"|   {epoch+1}   |    {train_acc:.5f} |    {train_loss:.5f} |   {train_auc:.5f} |   {test_acc:.5f} |   {test_loss:.5f} |  {test_auc:.5f} |")
+
+        return self.model_summary, best_model
     
 
     def get_class_probabilities(self, x: torch.Tensor) -> np.ndarray:

@@ -217,7 +217,9 @@ class SliceClassifier:
             if verbose:
                 print(f"|   {epoch+1}   |    {train_acc:.5f} |    {train_loss:.5f} |   {train_auc:.5f} |   {test_acc:.5f} |   {test_loss:.5f} |  {test_auc:.5f} |")
 
-        return self.model_summary, best_model
+        self.model = best_model
+
+        return self.model_summary, self.model
     
 
     def get_class_probabilities(self, x: torch.Tensor) -> np.ndarray:

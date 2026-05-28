@@ -39,7 +39,7 @@ def train_classifier(samples_path: str, labels_path: str) -> tuple[pd.DataFrame,
     train = SliceSample(X_train, y_train)
     test = SliceSample(X_test, y_test)
 
-    batch_size = 128
+    batch_size = 64
     train_loader = DataLoader(train, batch_size=batch_size)
     test_loader = DataLoader(test, batch_size=batch_size)
 
@@ -49,7 +49,7 @@ def train_classifier(samples_path: str, labels_path: str) -> tuple[pd.DataFrame,
     dev = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = SliceClassifier(epochs=epochs, learning_rate=learning_rate, momentum=momentum, device=dev)
 
-    model_summary, best_fit_model = model.best_fit(train_loader=train_loader, test_loader=test_loader)
+    model_summary, best_fit_model = model.best_fit(train_loader=train_loader, test_loader=test_loader, metric="loss")
 
     pred = model.get_class_probabilities(torch.Tensor(X_test).unsqueeze(1))[:, 1]
 
@@ -81,7 +81,3 @@ if __name__ == "__main__":
     fig = plot_summaries(summaries)
     plt.savefig("data/RADFUSION/trained_model_summary.png")
     plt.close(fig)
-    
-   
-
-

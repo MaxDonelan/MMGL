@@ -10,8 +10,13 @@ from lung_detection import *
 
 
 def train_parameter_combo(params, X_train, X_val, y_train, y_val, X_test, y_test):
-    batch_sizes = [8, 16, 32, 64, 128, 256]
-    learning_rates = [0.0001, 0.001, 0.01, 0.1]
+    """
+    Creates a SliceClassifier and trains it with the given paramaters and data.
+    Data is passed into the function to ensure that each iteration recieves the
+    same data.
+    """
+    batch_sizes = [16, 32, 64, 128, 256]
+    learning_rates = [0.001, 0.01, 0.1]
     batch_size = batch_sizes[params["batch_size"]]
     learning_rate = learning_rates[params["learning_rate"]]
     momentum = params["momentum"]
@@ -60,11 +65,11 @@ if __name__ == "__main__":
 
     best_choice = hyperopt.fmin(partial(train_parameter_combo, X_train=X_train, X_val=X_val, y_train=y_train, y_val=y_val, X_test=X_test, y_test=y_test), 
                                 space={
-                                    "batch_size": hp.randint("batch_size", 6),
-                                    "learning_rate": hp.randint("learning_rate", 4),
-                                    "momentum": hp.uniform("momentum", 0, 1)
+                                    "batch_size": hp.randint("batch_size", 5),
+                                    "learning_rate": hp.randint("learning_rate", 3),
+                                    "momentum": hp.uniform("momentum", 0.8, 0.99)
                                 },
                                 algo=hyperopt.tpe.suggest,
                                 max_evals=25)
-    
+
     print(best_choice)

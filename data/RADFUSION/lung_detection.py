@@ -141,7 +141,7 @@ class SliceClassifier:
         return self.model_summary, self.model
     
 
-    def best_fit(self, train_loader: DataLoader, test_loader: DataLoader, verbose: bool = True) -> tuple[pd.DataFrame, CNN]:
+    def best_fit(self, train_loader: DataLoader, test_loader: DataLoader, metric: str = "auc", verbose: bool = True) -> tuple[pd.DataFrame, CNN]:
         """
         Fits the SliceClassifer given a training and test dataset, but yields the model from the epoch with the highest 
         test AUC instead of the last epoch.
@@ -156,6 +156,10 @@ class SliceClassifier:
 
             A test set provided as a torch.utils.data.DataLoader constructed from a SliceSample.
 
+        **metric** : *str, default "auc"*
+
+            The metric by which to select the best epoch. One of "auc" (default), "acc", or "loss".
+
         **verbose** : *bool, default True*
         
             Whether to print each row (epoch) of the model summary as it is computed.
@@ -167,7 +171,13 @@ class SliceClassifier:
         if verbose:
             print("| Epoch | Train Acc. | Train Loss | Train AUC | Test Acc. | Test Loss | Test AUC |")
 
-        best_test_auc = 0
+        if metric == "loss":
+            best_test_metric = np.inf
+        elif metric == "acc" | metric == "auc":
+            best_test_metric = 0
+        else:
+            raise ValueError
+
         best_model = None
 
         for epoch in range(self.epochs):
@@ -207,9 +217,18 @@ class SliceClassifier:
             train_auc = roc_auc_score(train_actual, train_prob)
             test_auc = roc_auc_score(test_actual, test_prob)
 
-            if best_test_auc <= test_auc:
-                best_model = self.model
-                best_test_auc = test_auc
+            if metric == "loss":
+                if best_test_metric >= test_loss:
+                    best_model = self.model
+                    best_test_metric = test_loss
+            elif metric == "acc":
+                if best_test_metric <= test_auc:
+                    best_model = self.model
+                    best_test_metric = test_acc
+            else:
+                if best_test_metric <= test_auc:
+                    best_model = self.model
+                    best_test_metric = test_auc
 
             epoch_summary = pd.DataFrame({"Train Acc": [train_acc], "Train Loss": [train_loss], "Train AUC": [train_auc], 
                                           "Test Acc": [test_acc], "Test Loss": [test_loss], "Test AUC": [test_auc]})

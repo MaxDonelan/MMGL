@@ -173,7 +173,7 @@ class SliceClassifier:
 
         if metric == "loss":
             best_test_metric = np.inf
-        elif metric == "acc" | metric == "auc":
+        elif metric == "acc" or metric == "auc":
             best_test_metric = 0
         else:
             raise ValueError

@@ -365,7 +365,7 @@ def cv_train_lung_detector(samples_path: str, labels_path: str) -> list[pd.DataF
     n_samples = samples.shape[0]
 
     epochs = 25
-    batch_size = 128
+    batch_size = 64
     learning_rate = 0.01
     momentum = 0.9    
     model_summaries = []

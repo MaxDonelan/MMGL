@@ -1,5 +1,6 @@
 import random
 import argparse
+import pickle
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
@@ -24,7 +25,13 @@ def explore_cutoffs(test_pred: np.ndarray, test_labels: np.ndarray) -> plt.Figur
     pr_display.plot(ax=ax2)
     det_display.plot(ax=ax3)
 
-    return fig
+    return fig, [fpr, tpr, thres_roc]
+
+
+def balance_threshold(fpr, tpr, thres):
+    tnr = 1 - fpr
+    balanced_thres = np.argmin(abs(tpr - tnr))
+    return fpr[balanced_thres], tpr[balanced_thres], thres[balanced_thres]
 
 
 def train_classifier(samples_path: str, labels_path: str) -> tuple[pd.DataFrame, CNN]:
@@ -53,11 +60,16 @@ def train_classifier(samples_path: str, labels_path: str) -> tuple[pd.DataFrame,
 
     pred = model.get_class_probabilities(torch.Tensor(X_test).unsqueeze(1))[:, 1]
 
-    fig = explore_cutoffs(test_pred=pred, test_labels=y_test)
+    fig, roc_curve_list = explore_cutoffs(test_pred=pred, test_labels=y_test)
     plt.savefig("data/RADFUSION/cutoff_exploration.png")
     plt.close(fig)
 
-    return model_summary, best_fit_model
+    fpr, tpr, thres = balance_threshold(roc_curve_list[0], roc_curve_list[1], roc_curve_list[2])
+    print(f"\nBalanced FPR: {fpr:.4f} | Balanced TPR: {tpr:.4f} | Balanced Threshold: {thres:.4f}")
+
+    balanced_thres = {"fpr": fpr, "tpr": tpr, "thres": thres}
+
+    return model_summary, best_fit_model, balanced_thres
 
 
 if __name__ == "__main__":
@@ -74,10 +86,13 @@ if __name__ == "__main__":
     if seed is not None:
         random.seed(seed)
 
-    summary, model = train_classifier(samples_path=samples_path, labels_path=labels_path) 
+    summary, model, balanced_thres = train_classifier(samples_path=samples_path, labels_path=labels_path) 
     torch.save(model.state_dict(), "data/RADFUSION/trained_cnn.pt")
 
     summaries = [summary]
     fig = plot_summaries(summaries)
     plt.savefig("data/RADFUSION/trained_model_summary.png")
     plt.close(fig)
+
+    with open("data/RADFUSION/balanced_threshold.pkl", "wb") as f:
+        pickle.dump(balanced_thres, f)

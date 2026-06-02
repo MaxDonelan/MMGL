@@ -15,7 +15,7 @@ def process_scan(path, classifier: SliceClassifier, cutoff):
     scan = np.load(path)
     for i in range(scan.shape[0]):
         scan[i, :, :] = normalize_slice(scan[i, :, :])
-    scan = torch.tensor(scan).unsqueeze(1)
+    scan = torch.tensor(scan, dtype=torch.float32).unsqueeze(1)
     pred = classifier.predict(scan, cutoff=cutoff)
     scan = scan.squeeze()[pred, ::2, ::2].numpy() # not sure if .squeeze() is needed
     scan = scan.reshape(scan.shape[0], -1)
@@ -52,18 +52,19 @@ def preprocessing():
     labels = pd.read_csv(labels_path, index_col=0)
     
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    cnn = torch.load("data/RADFUSION/trained_cnn.pt")
+    cnn = torch.load("data/RADFUSION/trained_cnn.pt", map_location=device)
     slice_classifier = SliceClassifier(epochs=25,
                                        learning_rate=0.01,
                                        momentum=0.9,
                                        device=device,
                                        model=cnn)
-    cutoff = pickle.load("data/RADFUSION/balanced_threshold.pkl")
+    with open("data/RADFUSION/balanced_threshold.pkl", "rb") as f:
+        cutoff = pickle.load(f)["thres"]
 
     print("Creating CT scan paths...")
     ct_scan_paths = []
     for idx in labels.idx:
-        scan_path = scratch_dir.joinpath(str(idx), ".npy")
+        scan_path = scratch_dir.joinpath("images", str(idx) + ".npy")
         ct_scan_paths.append(scan_path)
 
     print("Processing images...")
@@ -75,7 +76,7 @@ def preprocessing():
         slice_level_labels.extend([labels.label[i]] * slc_set.shape[0])
         slice_level_idx.extend([labels.idx[i]] * slc_set.shape[0])
         slices.extend(slc_set)
-        if i % 10 == 9:
+        if i % 10 == 1:
             print(f"Cut non-lung slices from scan {i}")
 
     slices = np.stack(slices, axis=0)
@@ -115,10 +116,10 @@ def preprocessing():
 
     print("Creating the modality feature dictionary...")
     modal_feat_dict = {"EHR": [], "IMAGE": []}
-    modal_feat_dict["EHR"] = transformed_tabular.drop(columns=["idx", "label"]).columns
+    modal_feat_dict["EHR"] = transformed_tabular.drop(columns=["idx"]).columns
     modal_feat_dict["IMAGE"] = slices_df.drop(columns=["idx"]).columns
 
-    return radfusion, modal_feat_dict
+    return radfusion, modal_feat_dict, np.array(slice_level_idx)
 
 
 if __name__ == "__main__":
@@ -131,7 +132,8 @@ if __name__ == "__main__":
     if seed is not None:
         random.seed(seed)
 
-    prepared_data, modal_feat_dict = preprocessing()
+    prepared_data, modal_feat_dict, slice_level_idx = preprocessing()
     prepared_data.to_csv("data/RADFUSION/processed_standard_data.csv")
     np.save("data/RADFUSION/modal_feat_dict.npy", modal_feat_dict)
+    np.save("data/RADFUSION/slice_level_idx.npy", slice_level_idx)
     print("Done.")

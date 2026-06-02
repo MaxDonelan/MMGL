@@ -55,15 +55,14 @@ class SliceClassifier:
     """
     A class to initialize, fit, and store a CNN trained to classify CT scan slices.
     """
-    def __init__(self, epochs: int, learning_rate: float, momentum: float, device: str, model: CNN | None = None):
+    def __init__(self, epochs: int, learning_rate: float, momentum: float, device: str, model: dict[str, ] | None = None):
         self.epochs = epochs
         self.learning_rate = learning_rate
         self.momentum = momentum
         self.device = device
-        if model is None:
-            self.model = CNN().to(self.device)
-        else:
-            self.model = model.to(self.device)
+        self.model = CNN().to(self.device)
+        if model is not None:
+            self.model.load_state_dict(model)
         self.criterion = nn.CrossEntropyLoss()
         self.optimizer = optim.SGD(self.model.parameters(), lr=self.learning_rate, momentum=self.momentum)
         self.model_summary = pd.DataFrame({"Train Acc": [], "Train Loss": [], "Train AUC": [], 

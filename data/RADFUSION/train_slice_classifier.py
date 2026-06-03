@@ -10,7 +10,11 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import RocCurveDisplay, DetCurveDisplay, PrecisionRecallDisplay, roc_curve, precision_recall_curve, det_curve
 from lung_detection import *
 
-def explore_cutoffs(test_pred: np.ndarray, test_labels: np.ndarray) -> plt.Figure:
+def explore_cutoffs(test_pred: np.ndarray, test_labels: np.ndarray) -> tuple[plt.Figure, list[np.ndarray]]:
+    """
+    Obtain the ROC curve, precision/recall curve, and detection/error tradeoff curve, then plot them. Return
+    the figures and the false positive rate, true positive rate, and associated threshold, for all thresholds.
+    """
     fpr, tpr, thres_roc = roc_curve(test_labels, test_pred)
     precision, recall, thres_pr = precision_recall_curve(test_labels, test_pred)
     fpr_det, fnr, thres_det  = det_curve(test_labels, test_pred)
@@ -28,13 +32,23 @@ def explore_cutoffs(test_pred: np.ndarray, test_labels: np.ndarray) -> plt.Figur
     return fig, [fpr, tpr, thres_roc]
 
 
-def balance_threshold(fpr, tpr, thres):
+def balance_threshold(fpr: np.ndarray, tpr: np.ndarray, thres: np.ndarray) -> tuple[float, float, float]:
+    """
+    Find the threshold which best balances the true positive rate (TPR) and true negative rate (TNR)
+    and returns that threshold along with the associated false positive rate and true positive rate.
+    """
     tnr = 1 - fpr
     balanced_thres = np.argmin(abs(tpr - tnr))
     return fpr[balanced_thres], tpr[balanced_thres], thres[balanced_thres]
 
 
 def train_classifier(samples_path: str, labels_path: str) -> tuple[pd.DataFrame, CNN]:
+    """"
+    Load training data, normalize and split into train and test, create a SliceClassifier, then
+    fit the model, returning the model from the epoch with the best test loss, along with the
+    model summaries, and the cutoff that balances true positve rate and true negative rate with 
+    associated *false* positive rate and true postive rate.
+    """
     samples = np.load(samples_path)
     labels = np.load(labels_path)
 

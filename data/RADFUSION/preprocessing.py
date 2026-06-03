@@ -11,7 +11,11 @@ from sklearn.feature_selection import RFE
 from sklearn.preprocessing import normalize
 from lung_detection import *
 
-def process_scan(path, classifier: SliceClassifier, cutoff):
+def process_scan(path: Path, classifier: SliceClassifier, cutoff) -> np.ndarray:
+    """
+    Load a CT scan, normalize it, obtain the classifier's prediction, then resize the slices from
+    512x512 to 1x(256*256).
+    """
     scan = np.load(path)
     for i in range(scan.shape[0]):
         scan[i, :, :] = normalize_slice(scan[i, :, :])
@@ -23,6 +27,9 @@ def process_scan(path, classifier: SliceClassifier, cutoff):
 
 
 def load_EHR(dir: Path, labels):
+    """
+    Load the EHR data from the provided directory, keeping only indexes in labels.idx.
+    """
     demographics = pd.read_csv(dir / "Demographics.csv", index_col=0)
     demographics = demographics[demographics.idx.isin(labels.idx)].drop(columns=["Male", "SMOKER_N"])
 
@@ -46,6 +53,9 @@ def load_EHR(dir: Path, labels):
 
 
 def preprocessing():
+    """
+    Perform data preprocessing on the RadFusion dataset to format it for MMGL.
+    """
     print("Starting preprocessing...")
     scratch_dir = Path("/scratch/jacks.local/mrdonelan/radfusion/multimodalpulmonaryembolismdataset/")
     labels_path = scratch_dir / "Labels.csv"

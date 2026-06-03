@@ -11,7 +11,8 @@ from sklearn.feature_selection import RFE
 from sklearn.preprocessing import normalize
 from lung_detection import *
 
-def process_scan(path: Path, classifier: SliceClassifier, cutoff) -> np.ndarray:
+
+def process_scan(path: Path, classifier: SliceClassifier, cutoff) -> np.ndarray | None:
     """
     Load a CT scan, normalize it, obtain the classifier's prediction, then resize the slices from
     512x512 to 1x(256*256).
@@ -19,9 +20,13 @@ def process_scan(path: Path, classifier: SliceClassifier, cutoff) -> np.ndarray:
     scan = np.load(path)
     for i in range(scan.shape[0]):
         scan[i, :, :] = normalize_slice(scan[i, :, :])
-    scan = torch.tensor(scan, dtype=torch.float32).unsqueeze(1)
+    try:
+        scan = torch.tensor(scan, dtype=torch.float32).unsqueeze(1)
+    except TypeError:
+        print(f"Invalid Type: Skipping scan at {path}")
+        return None
     pred = classifier.predict(scan, cutoff=cutoff)
-    scan = scan.squeeze()[pred, ::2, ::2].numpy() # not sure if .squeeze() is needed
+    scan = scan[pred, :, ::4, ::4].numpy()
     scan = scan.reshape(scan.shape[0], -1)
     return scan
 
@@ -83,17 +88,18 @@ def preprocessing():
     slice_level_idx = []
     for i, path in enumerate(ct_scan_paths):
         slc_set = process_scan(path, slice_classifier, cutoff)
-        slice_level_labels.extend([labels.label[i]] * slc_set.shape[0])
-        slice_level_idx.extend([labels.idx[i]] * slc_set.shape[0])
-        slices.extend(slc_set)
-        if i % 10 == 1:
-            print(f"Cut non-lung slices from scan {i}")
+        if slc_set is not None:
+            slice_level_labels.extend([labels.label[i]] * slc_set.shape[0])
+            slice_level_idx.extend([labels.idx[i]] * slc_set.shape[0])
+            slices.extend(slc_set)
+        if i % 10 == 9:
+            print(f"Processed scan {i+1}")
 
     slices = np.stack(slices, axis=0)
     print(f"Shape of slice-level data: {slices.shape}")
 
     print("Performing PCA...")
-    pca_model = PCA(n_components=512) # could use better intuition on this value
+    pca_model = PCA(n_components=512, copy=False) # could use better intuition on this value
     slices_transformed = pca_model.fit_transform(X=slices, y=slice_level_labels)
 
     # EHR preprocessing

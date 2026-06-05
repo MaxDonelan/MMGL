@@ -16,9 +16,11 @@ from sklearn.metrics import roc_auc_score
 import matplotlib.cm
 import networkx as nx 
 from sklearn.metrics import confusion_matrix
-import dgl
-from dgl.dataloading import DataLoader, MultiLayerNeighborSampler
+import torch_geometric as pyg
+from torch_geometric.loader import NeighborLoader
 import scipy.sparse as sp
+from torch_geometric.data import Data
+from torch_geometric.utils import from_scipy_sparse_matrix
 
 from network import *
 from utils import *
@@ -91,8 +93,9 @@ class EvalHelper:
         
         if self.MP_mode == 'GCN':
             self.MessagePassing = GCN(self.out_dim, self.out_dim // 2, self.n_class, self.dropout).to(dev)
-        elif self.MP_mode == 'GAT':
-            self.MessagePassing = GAT(self.out_dim, self.out_dim // 2, self.n_class, self.dropout, self.alpha, nheads = 2).to(dev)
+        # Not implemented
+        # elif self.MP_mode == 'GAT':
+        #     self.MessagePassing = GAT(self.out_dim, self.out_dim // 2, self.n_class, self.dropout, self.alpha, nheads = 2).to(dev)
         
         self.optimizer_MF = optim.Adam(self.ModalFusion.parameters(), lr=hyperpm.lr, weight_decay=hyperpm.reg)
         self.optimizer_GC = optim.Adam(self.GraphConstruct.parameters(), lr=hyperpm.lr, weight_decay=hyperpm.reg)
@@ -183,32 +186,28 @@ class EvalHelper:
         np.save('adj.npy', adj.cpu().detach().numpy())
         normalized_adj = normalize_adj(adj + torch.eye(adj.size(0)).to(dev))
         sp_adj = sp.coo_matrix(normalized_adj.cpu().detach().numpy())
-        G = dgl.from_scipy(sp_adj).to(dev)
-        G.ndata['feat'] = hidden_matrix
-        G.ndata['label'] = torch.tensor(label).to(dev)
-        G.edata['w'] = torch.tensor(sp_adj.data).to(dev)
+        edge_index, edge_weight = from_scipy_sparse_matrix(sp_adj)
+        G = Data(x=hidden_matrix, 
+                 edge_index=edge_index, 
+                 edge_attr=edge_weight, 
+                 y=torch.tensor(label)).to(dev)
         
-        if test != False:
-            idx = list(range(G.num_nodes()))[-len(self.tst_idx):]
+        if test:
+            idx = list(range(G.num_nodes))[-len(self.tst_idx):]
         else:
-            idx = list(range(G.num_nodes()))
-        sampler = MultiLayerNeighborSampler([5,10])
-        node_loader = DataLoader(G,
-                                torch.tensor(idx).to(dev),
-                                sampler,
-                                batch_size=1000,
-                                shuffle=False,
-                                drop_last=False,
-                                num_workers=0)
-        num_batches, size = len(node_loader), len(node_loader.dataset)
-        for input_nodes, output_nodes, blocks in node_loader:
-            blocks = [b.to(dev) for b in blocks]
-            input_feat = blocks[0].srcdata['feat']
-            label = blocks[-1].dstdata['label']
-            prob = self.MessagePassing(blocks, input_feat)
+            idx = list(range(G.num_nodes))
+        node_loader =  NeighborLoader(G,
+                                      num_neighbors= [5, 10],
+                                      batch_size=128,
+                                      shuffle=False,
+                                      drop_last=False,
+                                      num_workers=0)
+        num_batches = len(node_loader)
+        for batch in node_loader: # batch is of type torch_geometric.data.Batch and inherits Data
+            batch = batch.to(dev)
+            label = batch.y
+            prob = self.MessagePassing(batch.x, batch.edge_index, batch.edge_attr)
             cls_loss = F.nll_loss(prob, label)
-            #print('---------------------------')
-            #print(cls_loss)
             cls_loss.backward()
             pred.extend(prob.argmax(1).cpu().numpy())
             targ.extend(label.cpu().numpy())
@@ -216,12 +215,10 @@ class EvalHelper:
             
         
         acc = (np.array(pred) == np.array(targ)).sum()/len(idx)
-        auc = roc_auc_score(one_hot(targ, self.n_class).numpy(), one_hot(pred, self.n_class).numpy())
+        auc = roc_auc_score(one_hot(targ, self.n_class).numpy(), one_hot(pred, self.n_class).numpy()) # I'm pretty sure this is wrong
         loss = loss/num_batches
         
         return acc, auc, loss
-        
-        
             
         
     def run_epoch(self, mode, end = ''):

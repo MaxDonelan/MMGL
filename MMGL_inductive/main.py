@@ -5,6 +5,7 @@ import random
 import sys
 import tempfile
 import time
+import warnings
 
 import gc
 import matplotlib.cm
@@ -21,11 +22,6 @@ import pandas as pd
 from network import *
 from utils import *
 from model import *
-import dgl
-
-# Suppress a pointless warning regarding not enabling CPU affinity, which does nothing for num_workers=0
-import warnings
-warnings.filterwarnings('ignore', message='.*Dataloader CPU affinity opt is not enabled.*')
 
 class RedirectStdStreams:
     def __init__(self, stdout=None, stderr=None):
@@ -53,11 +49,10 @@ def set_rng_seed(seed):
     torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
-    dgl.seed(seed)
-    dgl.random.seed(seed)
+    torch_geometric.seed_everything(seed)
     
     
-def sen(con_mat,n):#n为分类数
+def sen(con_mat,n):# n is the number of categories
     
     sen = []
     for i in range(n):
@@ -99,7 +94,7 @@ def train_and_eval(datadir, datname, hyperpm):
         hyperpm.nclass = 2
         hyperpm.nmodal = 2
     #np.random.shuffle(data)
-    
+
     use_cuda = torch.cuda.is_available()
     dev = torch.device('cuda' if use_cuda else 'cpu')
     input_data_dims = []
@@ -217,6 +212,8 @@ def main(args_str=None):
 
 
 if __name__ == '__main__':
+    # Suppress a pointless warning regarding not enabling CPU affinity, which does nothing for num_workers=0
+    warnings.filterwarnings('ignore', message='.*Dataloader CPU affinity opt is not enabled.*')
     print(str(main()))
     for _ in range(5):
         gc.collect()

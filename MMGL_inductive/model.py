@@ -102,43 +102,43 @@ class EvalHelper:
         self.ModalFusion.apply(my_weight_init)
         
     def forward(self, dataloader, dev):
-        loss, pred, targ = 0, [], []
-        num_batches, size = len(dataloader), len(dataloader.dataset)
+        loss, prob, pred, targ = 0, [], [], []
+        num_batches = len(dataloader)
         
         for i, (feat, label) in enumerate(dataloader):
             feat, label = feat.float().to(dev), label.long().to(dev)
-            prob, hidden, attn = self.ModalFusion(feat)
-            cls_loss = F.nll_loss(prob, label)
+            output, hidden, attn = self.ModalFusion(feat)
+            cls_loss = F.nll_loss(output, label)
             cls_loss.backward()
-            
-            pred.extend(prob.argmax(1).cpu().numpy())
+            prob.extend(output.cpu().numpy()[:, 1])
+            pred.extend(output.argmax(1).cpu().numpy())
             targ.extend(label.cpu().numpy())
             loss += cls_loss.item()
         
-        correct = (np.array(pred) == np.array(targ)).sum()
-        auc = roc_auc_score(one_hot(targ, self.n_class).numpy(), one_hot(pred, self.n_class).numpy())
-        return loss/num_batches, correct/size, auc
+        avg_loss = loss / num_batches
+        acc = np.mean((np.array(pred) == np.array(targ)).sum())
+        auc = roc_auc_score(targ, prob)
+        return avg_loss, acc, auc
     
     def forward_MF(self, dev, test=False):
-        loss, pred, targ = 0, [], []
+        loss, prob, pred, targ = 0, [], [], []
         dataloader = self.trn_loader
-        num_batches, size = len(dataloader), len(dataloader.dataset)
+        num_batches = len(dataloader)
         hidden_matrix = torch.empty((0)).to(dev)
         for i, (feat, label) in enumerate(dataloader):
             feat, label = feat.float().to(dev), label.long().to(dev)
-            prob, hidden, attn = self.ModalFusion(feat)
-            cls_loss = F.nll_loss(prob, label)
-            #cls_loss.backward()
-            
-            pred.extend(prob.argmax(1).cpu().numpy())
+            output, hidden, attn = self.ModalFusion(feat)
+            cls_loss = F.nll_loss(output, label)
+            prob.extend(output.cpu().numpy()[:, 1])
+            pred.extend(output.argmax(1).cpu().numpy())
             targ.extend(label.cpu().numpy())
-            loss += cls_loss#.item()
+            loss += cls_loss.item()
             
             hidden_matrix = torch.cat([hidden_matrix,hidden],0)
             
-        trn_acc = (np.array(pred) == np.array(targ)).sum()/size
-        trn_auc = roc_auc_score(one_hot(targ, self.n_class).numpy(), one_hot(pred, self.n_class).numpy())
-        trn_loss = loss.item()/num_batches
+        trn_acc = np.mean((np.array(pred) == np.array(targ)).sum())
+        trn_auc = roc_auc_score(targ, prob)
+        trn_loss = loss/num_batches
         
         adj = self.GraphConstruct(hidden_matrix)
         graph_loss = GraphConstructLoss(hidden_matrix, adj, self.hyperpm.theta_smooth, self.hyperpm.theta_degree, self.hyperpm.theta_sparsity, dev)
@@ -150,25 +150,25 @@ class EvalHelper:
         val_acc, val_auc, val_loss = None, None, None
         
         if test != False:
-            loss, pred, tst_targ = 0, [], []
+            loss, prob, pred, tst_targ = 0, [], [], []
             if test == 'val':
                 val_loader = self.val_loader
             else:
                 val_loader = self.tst_loader
-            num_batches, size = len(val_loader), len(val_loader.dataset)
+            num_batches = len(val_loader)
             
             for i, (feat, label) in enumerate(val_loader):
                 feat, label = feat.float().to(dev), label.long().to(dev)
-                prob, hidden, attn = self.ModalFusion(feat)
-                cls_loss = F.nll_loss(prob, label)
-                
-                pred.extend(prob.argmax(1).cpu().numpy())
+                output, hidden, attn = self.ModalFusion(feat)
+                cls_loss = F.nll_loss(output, label)
+                prob.extend(output.cpu().numpy()[:, 1])
+                pred.extend(output.argmax(1).cpu().numpy())
                 tst_targ.extend(label.cpu().numpy())
                 loss += cls_loss.item()
                 
                 hidden_matrix = torch.cat([hidden_matrix,hidden],0)
-            val_acc = (np.array(pred) == np.array(tst_targ)).sum()/size
-            val_auc = roc_auc_score(one_hot(tst_targ, self.n_class).numpy(), one_hot(pred, self.n_class).numpy())
+            val_acc = np.mean((np.array(pred) == np.array(tst_targ)).sum())
+            val_auc = roc_auc_score(tst_targ, prob)
             val_loss = loss/num_batches
             
             targ.extend(tst_targ)
@@ -179,7 +179,7 @@ class EvalHelper:
 
 
     def forward_graph(self, hidden_matrix, adj_dict, dev, test=False):
-        loss, pred, targ = 0, [], []
+        loss, prob, pred, targ = 0, [], [], []
         adj, label = adj_dict['adj'], adj_dict['label']
         np.save('adj.npy', adj.cpu().detach().numpy())
         normalized_adj = normalize_adj(adj + torch.eye(adj.size(0)).to(dev))
@@ -204,16 +204,17 @@ class EvalHelper:
         for batch in node_loader: # batch is of type torch_geometric.data.Batch and inherits Data
             batch = batch.to(dev)
             label = batch.y
-            prob = self.MessagePassing(batch.x, batch.edge_index, batch.edge_attr)
-            cls_loss = F.nll_loss(prob, label)
+            output = self.MessagePassing(batch.x, batch.edge_index, batch.edge_attr)
+            cls_loss = F.nll_loss(output, label)
             cls_loss.backward()
-            pred.extend(prob.argmax(1).cpu().numpy())
+            prob.extend(output.cpu().numpy()[:, 1])
+            pred.extend(output.argmax(1).cpu().numpy())
             targ.extend(label.cpu().numpy())
             loss += cls_loss.item()
             
         
-        acc = (np.array(pred) == np.array(targ)).sum()/len(idx)
-        auc = roc_auc_score(one_hot(targ, self.n_class).numpy(), one_hot(pred, self.n_class).numpy()) # I'm pretty sure this is wrong
+        acc = np.mean((np.array(pred) == np.array(targ)).sum())
+        auc = roc_auc_score(targ, prob)
         loss = loss/num_batches
         
         return acc, auc, loss

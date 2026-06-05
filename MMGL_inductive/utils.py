@@ -26,13 +26,10 @@ def one_hot(x, class_count):
     return torch.eye(class_count)[x,:]
 
 
-def GraphConstructLoss(feat, adj, theta_smooth, theta_degree, theta_sparsity):
+def GraphConstructLoss(feat, adj, theta_smooth, theta_degree, theta_sparsity, dev):
     # Graph regularization
-    use_cuda = torch.cuda.is_available()
-    dev = torch.device('cuda' if use_cuda else 'cpu')
     L = torch.diagflat(torch.sum(adj, -1)) - adj
     vec_one = torch.ones(adj.size(-1)).to(dev)
-    
     
     smoothess_penalty = torch.trace(torch.mm(feat.T, torch.mm(L, feat))) / int(np.prod(adj.shape))
     degree_penalty = torch.mm(vec_one.unsqueeze(0), torch.log(torch.mm(adj, vec_one.unsqueeze(-1)) + 1e-5)).squeeze() / adj.shape[-1]

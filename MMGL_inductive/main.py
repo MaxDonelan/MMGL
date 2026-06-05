@@ -69,6 +69,7 @@ def spe(con_mat,n):
     
 def train_and_eval(datadir, datname, hyperpm):
     torch_geometric.seed_everything(hyperpm.seed)
+    dev = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     path = datadir + datname + '/'
     modal_feat_dict = np.load(path + 'modal_feat_dict.npy', allow_pickle=True).item()
     data = pd.read_csv(path + 'processed_standard_data.csv').values
@@ -84,8 +85,6 @@ def train_and_eval(datadir, datname, hyperpm):
         hyperpm.nmodal = 2
     #np.random.shuffle(data)
 
-    use_cuda = torch.cuda.is_available()
-    dev = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     input_data_dims = []
     for i in modal_feat_dict.keys():
         input_data_dims.append(len(modal_feat_dict[i]))
@@ -100,7 +99,7 @@ def train_and_eval(datadir, datname, hyperpm):
     clk = 0
     for train_index, test_index in skf.split(input_data, label):
         clk += 1
-        agent = EvalHelper(input_data_dims, input_data, label, hyperpm, train_index, test_index)
+        agent = EvalHelper(input_data_dims, input_data, label, hyperpm, train_index, test_index, device=dev)
         tm = time.time()
         best_val_acc, wait_cnt = 0.0, 0
         model_sav = tempfile.TemporaryFile()

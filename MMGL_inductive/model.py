@@ -41,12 +41,10 @@ class disease_dataset(Dataset):
 
 
 class EvalHelper:
-    def __init__(self, input_data_dims, feat, label, hyperpm, train_index, test_index):
-        use_cuda = torch.cuda.is_available()
-        dev = torch.device('cuda' if use_cuda else 'cpu')
+    def __init__(self, input_data_dims, feat, label, hyperpm, train_index, test_index, device):
         #feat = torch.from_numpy(feat).float().to(dev)
         #label = torch.from_numpy(label).long().to(dev)
-        self.dev = dev
+        self.dev = device
         self.hyperpm = hyperpm
         self.GC_mode = hyperpm.GC_mode
         self.MP_mode = hyperpm.MP_mode
@@ -84,18 +82,18 @@ class EvalHelper:
         weight = len(trn_label)/np.array(list(counter.values()))/self.n_class
         
         self.out_dim = self.d_v * self.n_head + self.modal_num**2
-        self.weight = torch.from_numpy(weight).float().to(dev)
+        self.weight = torch.from_numpy(weight).float().to(self.dev)
         if self.MF_mode == 'sum':
-            self.ModalFusion = VLTransformer_Gate(input_data_dims, hyperpm).to(dev)
+            self.ModalFusion = VLTransformer_Gate(input_data_dims, hyperpm).to(self.dev)
         else:
-            self.ModalFusion = VLTransformer(input_data_dims, hyperpm).to(dev)
-        self.GraphConstruct = GraphLearn(self.out_dim, th = self.th, mode = self.GC_mode).to(dev)
+            self.ModalFusion = VLTransformer(input_data_dims, hyperpm).to(self.dev)
+        self.GraphConstruct = GraphLearn(self.out_dim, th = self.th, mode = self.GC_mode).to(self.dev)
         
         if self.MP_mode == 'GCN':
-            self.MessagePassing = GCN(self.out_dim, self.out_dim // 2, self.n_class, self.dropout).to(dev)
+            self.MessagePassing = GCN(self.out_dim, self.out_dim // 2, self.n_class, self.dropout).to(self.dev)
         # Not implemented
         # elif self.MP_mode == 'GAT':
-        #     self.MessagePassing = GAT(self.out_dim, self.out_dim // 2, self.n_class, self.dropout, self.alpha, nheads = 2).to(dev)
+        #     self.MessagePassing = GAT(self.out_dim, self.out_dim // 2, self.n_class, self.dropout, self.alpha, nheads = 2).to(self.dev)
         
         self.optimizer_MF = optim.Adam(self.ModalFusion.parameters(), lr=hyperpm.lr, weight_decay=hyperpm.reg)
         self.optimizer_GC = optim.Adam(self.GraphConstruct.parameters(), lr=hyperpm.lr, weight_decay=hyperpm.reg)
@@ -143,7 +141,7 @@ class EvalHelper:
         trn_loss = loss.item()/num_batches
         
         adj = self.GraphConstruct(hidden_matrix)
-        graph_loss = GraphConstructLoss(hidden_matrix, adj, self.hyperpm.theta_smooth, self.hyperpm.theta_degree, self.hyperpm.theta_sparsity)
+        graph_loss = GraphConstructLoss(hidden_matrix, adj, self.hyperpm.theta_smooth, self.hyperpm.theta_degree, self.hyperpm.theta_sparsity, dev)
         adj = {'adj':adj, 'label':np.array(targ)}
         loss += graph_loss
         loss.backward()

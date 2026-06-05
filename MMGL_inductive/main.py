@@ -39,17 +39,6 @@ class RedirectStdStreams:
         self._stderr.flush()
         sys.stdout = self.old_stdout
         sys.stderr = self.old_stderr
-        
-        
-def set_rng_seed(seed):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.benchmark = False
-    torch.backends.cudnn.deterministic = True
-    torch_geometric.seed_everything(seed)
     
     
 def sen(con_mat,n):# n is the number of categories
@@ -79,7 +68,7 @@ def spe(con_mat,n):
     
     
 def train_and_eval(datadir, datname, hyperpm):
-    set_rng_seed(hyperpm.seed)
+    torch_geometric.seed_everything(hyperpm.seed)
     path = datadir + datname + '/'
     modal_feat_dict = np.load(path + 'modal_feat_dict.npy', allow_pickle=True).item()
     data = pd.read_csv(path + 'processed_standard_data.csv').values
@@ -96,7 +85,7 @@ def train_and_eval(datadir, datname, hyperpm):
     #np.random.shuffle(data)
 
     use_cuda = torch.cuda.is_available()
-    dev = torch.device('cuda' if use_cuda else 'cpu')
+    dev = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     input_data_dims = []
     for i in modal_feat_dict.keys():
         input_data_dims.append(len(modal_feat_dict[i]))
@@ -104,7 +93,6 @@ def train_and_eval(datadir, datname, hyperpm):
     input_data = data[:,:-1]
     label = data[:,-1]-1
     skf = StratifiedKFold(n_splits=10, random_state=hyperpm.seed, shuffle=True)
-    set_rng_seed(hyperpm.seed)
     val_acc, tst_acc, tst_auc = [], [], []
     shared_acc_list, shared_auc_list = [], []
     sp_acc_list, sp_auc_list = [], []

@@ -110,7 +110,7 @@ class EvalHelper:
             output, hidden, attn = self.ModalFusion(feat)
             cls_loss = F.nll_loss(output, label)
             cls_loss.backward()
-            prob.extend(output.cpu().numpy()[:, 1])
+            prob.extend(output.cpu().detach().numpy()[:, 1])
             pred.extend(output.argmax(1).cpu().numpy())
             targ.extend(label.cpu().numpy())
             loss += cls_loss.item()
@@ -129,7 +129,7 @@ class EvalHelper:
             feat, label = feat.float().to(dev), label.long().to(dev)
             output, hidden, attn = self.ModalFusion(feat)
             cls_loss = F.nll_loss(output, label)
-            prob.extend(output.cpu().numpy()[:, 1])
+            prob.extend(output.cpu().detach().numpy()[:, 1])
             pred.extend(output.argmax(1).cpu().numpy())
             targ.extend(label.cpu().numpy())
             loss += cls_loss.item()
@@ -161,7 +161,7 @@ class EvalHelper:
                 feat, label = feat.float().to(dev), label.long().to(dev)
                 output, hidden, attn = self.ModalFusion(feat)
                 cls_loss = F.nll_loss(output, label)
-                prob.extend(output.cpu().numpy()[:, 1])
+                prob.extend(output.cpu().detach().numpy()[:, 1])
                 pred.extend(output.argmax(1).cpu().numpy())
                 tst_targ.extend(label.cpu().numpy())
                 loss += cls_loss.item()
@@ -196,7 +196,7 @@ class EvalHelper:
             idx = list(range(G.num_nodes))
         node_loader =  NeighborLoader(G,
                                       num_neighbors= [5, 10],
-                                      batch_size=128,
+                                      batch_size=1000,
                                       shuffle=False,
                                       drop_last=False,
                                       num_workers=0)
@@ -207,7 +207,7 @@ class EvalHelper:
             output = self.MessagePassing(batch.x, batch.edge_index, batch.edge_attr)
             cls_loss = F.nll_loss(output, label)
             cls_loss.backward()
-            prob.extend(output.cpu().numpy()[:, 1])
+            prob.extend(output.cpu().detach().numpy()[:, 1])
             pred.extend(output.argmax(1).cpu().numpy())
             targ.extend(label.cpu().numpy())
             loss += cls_loss.item()

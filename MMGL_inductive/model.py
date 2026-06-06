@@ -1,6 +1,7 @@
 import os
 import random
 import sys
+import tempfile
 
 import networkx as nx
 import numpy as np
@@ -116,7 +117,7 @@ class EvalHelper:
             loss += cls_loss.item()
         
         avg_loss = loss / num_batches
-        acc = np.mean((np.array(pred) == np.array(targ)).sum())
+        acc = np.mean((np.array(pred) == np.array(targ)))
         auc = roc_auc_score(targ, prob)
         return avg_loss, acc, auc
     
@@ -132,13 +133,13 @@ class EvalHelper:
             prob.extend(output.cpu().detach().numpy()[:, 1])
             pred.extend(output.argmax(1).cpu().numpy())
             targ.extend(label.cpu().numpy())
-            loss += cls_loss.item()
+            loss += cls_loss
             
             hidden_matrix = torch.cat([hidden_matrix,hidden],0)
             
-        trn_acc = np.mean((np.array(pred) == np.array(targ)).sum())
+        trn_acc = np.mean((np.array(pred) == np.array(targ)))
         trn_auc = roc_auc_score(targ, prob)
-        trn_loss = loss/num_batches
+        trn_loss = loss.item()/num_batches
         
         adj = self.GraphConstruct(hidden_matrix)
         graph_loss = GraphConstructLoss(hidden_matrix, adj, self.hyperpm.theta_smooth, self.hyperpm.theta_degree, self.hyperpm.theta_sparsity, dev)
@@ -167,7 +168,7 @@ class EvalHelper:
                 loss += cls_loss.item()
                 
                 hidden_matrix = torch.cat([hidden_matrix,hidden],0)
-            val_acc = np.mean((np.array(pred) == np.array(tst_targ)).sum())
+            val_acc = np.mean((np.array(pred) == np.array(tst_targ)))
             val_auc = roc_auc_score(tst_targ, prob)
             val_loss = loss/num_batches
             
@@ -196,7 +197,7 @@ class EvalHelper:
             idx = list(range(G.num_nodes))
         node_loader =  NeighborLoader(G,
                                       num_neighbors= [5, 10],
-                                      batch_size=1000,
+                                      batch_size=64,
                                       shuffle=False,
                                       drop_last=False,
                                       num_workers=0)
@@ -204,16 +205,20 @@ class EvalHelper:
         for batch in node_loader: # batch is of type torch_geometric.data.Batch and inherits Data
             batch = batch.to(dev)
             label = batch.y
-            output = self.MessagePassing(batch.x, batch.edge_index, batch.edge_attr)
-            cls_loss = F.nll_loss(output, label)
+            # print(num_batches, batch.x.shape, batch.edge_index.shape, batch.edge_attr.shape, batch.y.shape)
+            output = self.MessagePassing(batch.x, edge_index=batch.edge_index, edge_attr=batch.edge_attr)
+            num_root_nodes = batch.input_id.size(0) # Root nodes are always the first num_root_nodes in the batch
+            root_output = output[:num_root_nodes]
+            root_labels = batch.y[:num_root_nodes]
+            cls_loss = F.nll_loss(root_output, root_labels)
             cls_loss.backward()
-            prob.extend(output.cpu().detach().numpy()[:, 1])
-            pred.extend(output.argmax(1).cpu().numpy())
-            targ.extend(label.cpu().numpy())
+            prob.extend(root_output.cpu().detach().numpy()[:, 1])
+            pred.extend(root_output.argmax(1).cpu().numpy())
+            targ.extend(root_labels.cpu().numpy())
             loss += cls_loss.item()
             
         
-        acc = np.mean((np.array(pred) == np.array(targ)).sum())
+        acc = np.mean((np.array(pred) == np.array(targ)))
         auc = roc_auc_score(targ, prob)
         loss = loss/num_batches
         

@@ -5,6 +5,7 @@ import random
 import sys
 import tempfile
 import time
+import warnings
 
 import gc
 import matplotlib.cm
@@ -21,11 +22,6 @@ import pandas as pd
 from network import *
 from utils import *
 from model import *
-import dgl
-
-# Suppress a pointless warning regarding not enabling CPU affinity, which does nothing for num_workers=0
-import warnings
-warnings.filterwarnings('ignore', message='.*Dataloader CPU affinity opt is not enabled.*')
 
 class RedirectStdStreams:
     def __init__(self, stdout=None, stderr=None):
@@ -43,21 +39,9 @@ class RedirectStdStreams:
         self._stderr.flush()
         sys.stdout = self.old_stdout
         sys.stderr = self.old_stderr
-        
-        
-def set_rng_seed(seed):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.benchmark = False
-    torch.backends.cudnn.deterministic = True
-    dgl.seed(seed)
-    dgl.random.seed(seed)
     
     
-def sen(con_mat,n):#n为分类数
+def sen(con_mat,n):# n is the number of categories
     
     sen = []
     for i in range(n):
@@ -84,7 +68,8 @@ def spe(con_mat,n):
     
     
 def train_and_eval(datadir, datname, hyperpm):
-    set_rng_seed(hyperpm.seed)
+    torch_geometric.seed_everything(hyperpm.seed)
+    dev = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     path = datadir + datname + '/'
     modal_feat_dict = np.load(path + 'modal_feat_dict.npy', allow_pickle=True).item()
     data = pd.read_csv(path + 'processed_standard_data.csv').values
@@ -99,9 +84,7 @@ def train_and_eval(datadir, datname, hyperpm):
         hyperpm.nclass = 2
         hyperpm.nmodal = 2
     #np.random.shuffle(data)
-    
-    use_cuda = torch.cuda.is_available()
-    dev = torch.device('cuda' if use_cuda else 'cpu')
+
     input_data_dims = []
     for i in modal_feat_dict.keys():
         input_data_dims.append(len(modal_feat_dict[i]))
@@ -109,7 +92,6 @@ def train_and_eval(datadir, datname, hyperpm):
     input_data = data[:,:-1]
     label = data[:,-1]-1
     skf = StratifiedKFold(n_splits=10, random_state=hyperpm.seed, shuffle=True)
-    set_rng_seed(hyperpm.seed)
     val_acc, tst_acc, tst_auc = [], [], []
     shared_acc_list, shared_auc_list = [], []
     sp_acc_list, sp_auc_list = [], []
@@ -117,7 +99,7 @@ def train_and_eval(datadir, datname, hyperpm):
     clk = 0
     for train_index, test_index in skf.split(input_data, label):
         clk += 1
-        agent = EvalHelper(input_data_dims, input_data, label, hyperpm, train_index, test_index)
+        agent = EvalHelper(input_data_dims, input_data, label, hyperpm, train_index, test_index, device=dev)
         tm = time.time()
         best_val_acc, wait_cnt = 0.0, 0
         model_sav = tempfile.TemporaryFile()
@@ -217,6 +199,8 @@ def main(args_str=None):
 
 
 if __name__ == '__main__':
+    # Suppress a pointless warning regarding not enabling CPU affinity, which does nothing for num_workers=0
+    warnings.filterwarnings('ignore', message='.*Dataloader CPU affinity opt is not enabled.*')
     print(str(main()))
     for _ in range(5):
         gc.collect()

@@ -18,8 +18,8 @@ import torch.nn.functional as F
 import torch.optim as optim
 import math
 from layers import *
-import dgl
-from dgl.nn import GraphConv
+import torch_geometric
+from torch_geometric.nn import GCNConv
 
 
 class VLTransformer(nn.Module):
@@ -172,12 +172,12 @@ class GraphLearn(nn.Module):
 class GCN(nn.Module):
     def __init__(self, in_feats, h_feats, num_classes, dropout):
         super(GCN, self).__init__()
-        self.conv1 = GraphConv(in_feats, h_feats)
-        self.conv2 = GraphConv(h_feats, num_classes)
+        self.conv1 = GCNConv(in_feats, h_feats)
+        self.conv2 = GCNConv(h_feats, num_classes)
         self.dropout = dropout
 
-    def forward(self, blocks, in_feat):
-        h = F.relu(self.conv1(blocks[0], in_feat))
+    def forward(self, x, edge_index, edge_attr):
+        h = F.relu(self.conv1(x, edge_index, edge_attr))
         h = F.dropout(h, self.dropout, training=self.training)
-        h = F.relu(self.conv2(blocks[1], h))
+        h = F.relu(self.conv2(h, edge_index, edge_attr))
         return F.log_softmax(h, dim=1)    

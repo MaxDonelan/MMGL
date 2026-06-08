@@ -32,7 +32,7 @@ class Attention(nn.Module):
         attn = attn/abs(attn.min())
         attn = self.dropout(F.softmax(F.normalize(attn, dim=-1), dim=-1))
         #attn = self.dropout(F.softmax(attn, dim=-1))
-        # 概率分布xV
+        # probability distribution xV
         output = torch.matmul(attn, v)
 
         return output, attn, v
@@ -41,7 +41,7 @@ class FeedForwardLayer(nn.Module):
 
     def __init__(self, d_in, d_hid, dropout=0.1):
         super().__init__()
-        # 两个fc层，对最后的512维度进行变换
+        # Two fully connected layers transform the final 512 dimensions.
         self.w_1 = nn.Linear(d_in, d_hid) # position-wise
         self.w_2 = nn.Linear(d_hid, d_in) # position-wise
         self.layer_norm = nn.LayerNorm(d_in, eps=1e-6)
@@ -86,7 +86,7 @@ class VariLengthInputLayer(nn.Module):
     
     def forward(self, input_data, mask=None):
         """
-        输入的向量是各个模态concatenate起来的
+        The input vector is a concatenation of the various modalities.
         """
         temp_dim = 0
         bs = input_data.size(0)
@@ -113,7 +113,7 @@ class VariLengthInputLayer(nn.Module):
         v = v.view(bs, modal_num, self.n_head, self.d_v)
         q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
         
-        q, attn, residual = self.attention(q, k, v)#注意因为没有同输入相比维度发生变化，因此以v作为残差
+        q, attn, residual = self.attention(q, k, v) # Note that since the dimension has not changed compared to the input, v is used as the residual.
         q = q.transpose(1, 2).contiguous().view(bs, modal_num, -1)
         residual = residual.transpose(1, 2).contiguous().view(bs, modal_num, -1)
         q = self.dropout(self.fc(q))

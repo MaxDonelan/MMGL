@@ -1,6 +1,7 @@
 import os
 import random
 import sys
+import tempfile
 
 import networkx as nx
 import numpy as np
@@ -16,9 +17,11 @@ from sklearn.metrics import roc_auc_score
 import matplotlib.cm
 import networkx as nx 
 from sklearn.metrics import confusion_matrix
-import dgl
-from dgl.dataloading import DataLoader, MultiLayerNeighborSampler
+import torch_geometric as pyg
+from torch_geometric.loader import NeighborLoader
 import scipy.sparse as sp
+from torch_geometric.data import Data
+from torch_geometric.utils import from_scipy_sparse_matrix
 
 from network import *
 from utils import *
@@ -39,12 +42,10 @@ class disease_dataset(Dataset):
 
 
 class EvalHelper:
-    def __init__(self, input_data_dims, feat, label, hyperpm, train_index, test_index):
-        use_cuda = torch.cuda.is_available()
-        dev = torch.device('cuda' if use_cuda else 'cpu')
+    def __init__(self, input_data_dims, feat, label, hyperpm, train_index, test_index, device):
         #feat = torch.from_numpy(feat).float().to(dev)
         #label = torch.from_numpy(label).long().to(dev)
-        self.dev = dev
+        self.dev = device
         self.hyperpm = hyperpm
         self.GC_mode = hyperpm.GC_mode
         self.MP_mode = hyperpm.MP_mode
@@ -82,17 +83,18 @@ class EvalHelper:
         weight = len(trn_label)/np.array(list(counter.values()))/self.n_class
         
         self.out_dim = self.d_v * self.n_head + self.modal_num**2
-        self.weight = torch.from_numpy(weight).float().to(dev)
+        self.weight = torch.from_numpy(weight).float().to(self.dev)
         if self.MF_mode == 'sum':
-            self.ModalFusion = VLTransformer_Gate(input_data_dims, hyperpm).to(dev)
+            self.ModalFusion = VLTransformer_Gate(input_data_dims, hyperpm).to(self.dev)
         else:
-            self.ModalFusion = VLTransformer(input_data_dims, hyperpm).to(dev)
-        self.GraphConstruct = GraphLearn(self.out_dim, th = self.th, mode = self.GC_mode).to(dev)
+            self.ModalFusion = VLTransformer(input_data_dims, hyperpm).to(self.dev)
+        self.GraphConstruct = GraphLearn(self.out_dim, th = self.th, mode = self.GC_mode).to(self.dev)
         
         if self.MP_mode == 'GCN':
-            self.MessagePassing = GCN(self.out_dim, self.out_dim // 2, self.n_class, self.dropout).to(dev)
-        elif self.MP_mode == 'GAT':
-            self.MessagePassing = GAT(self.out_dim, self.out_dim // 2, self.n_class, self.dropout, self.alpha, nheads = 2).to(dev)
+            self.MessagePassing = GCN(self.out_dim, self.out_dim // 2, self.n_class, self.dropout).to(self.dev)
+        # Not implemented
+        # elif self.MP_mode == 'GAT':
+        #     self.MessagePassing = GAT(self.out_dim, self.out_dim // 2, self.n_class, self.dropout, self.alpha, nheads = 2).to(self.dev)
         
         self.optimizer_MF = optim.Adam(self.ModalFusion.parameters(), lr=hyperpm.lr, weight_decay=hyperpm.reg)
         self.optimizer_GC = optim.Adam(self.GraphConstruct.parameters(), lr=hyperpm.lr, weight_decay=hyperpm.reg)
@@ -101,46 +103,46 @@ class EvalHelper:
         self.ModalFusion.apply(my_weight_init)
         
     def forward(self, dataloader, dev):
-        loss, pred, targ = 0, [], []
-        num_batches, size = len(dataloader), len(dataloader.dataset)
+        loss, prob, pred, targ = 0, [], [], []
+        num_batches = len(dataloader)
         
         for i, (feat, label) in enumerate(dataloader):
             feat, label = feat.float().to(dev), label.long().to(dev)
-            prob, hidden, attn = self.ModalFusion(feat)
-            cls_loss = F.nll_loss(prob, label)
+            output, hidden, attn = self.ModalFusion(feat)
+            cls_loss = F.nll_loss(output, label)
             cls_loss.backward()
-            
-            pred.extend(prob.argmax(1).cpu().numpy())
+            prob.extend(output.cpu().detach().numpy()[:, 1])
+            pred.extend(output.argmax(1).cpu().numpy())
             targ.extend(label.cpu().numpy())
             loss += cls_loss.item()
         
-        correct = (np.array(pred) == np.array(targ)).sum()
-        auc = roc_auc_score(one_hot(targ, self.n_class).numpy(), one_hot(pred, self.n_class).numpy())
-        return loss/num_batches, correct/size, auc
+        avg_loss = loss / num_batches
+        acc = np.mean((np.array(pred) == np.array(targ)))
+        auc = roc_auc_score(targ, prob)
+        return avg_loss, acc, auc
     
     def forward_MF(self, dev, test=False):
-        loss, pred, targ = 0, [], []
+        loss, prob, pred, targ = 0, [], [], []
         dataloader = self.trn_loader
-        num_batches, size = len(dataloader), len(dataloader.dataset)
+        num_batches = len(dataloader)
         hidden_matrix = torch.empty((0)).to(dev)
         for i, (feat, label) in enumerate(dataloader):
             feat, label = feat.float().to(dev), label.long().to(dev)
-            prob, hidden, attn = self.ModalFusion(feat)
-            cls_loss = F.nll_loss(prob, label)
-            #cls_loss.backward()
-            
-            pred.extend(prob.argmax(1).cpu().numpy())
+            output, hidden, attn = self.ModalFusion(feat)
+            cls_loss = F.nll_loss(output, label)
+            prob.extend(output.cpu().detach().numpy()[:, 1])
+            pred.extend(output.argmax(1).cpu().numpy())
             targ.extend(label.cpu().numpy())
-            loss += cls_loss#.item()
+            loss += cls_loss
             
             hidden_matrix = torch.cat([hidden_matrix,hidden],0)
             
-        trn_acc = (np.array(pred) == np.array(targ)).sum()/size
-        trn_auc = roc_auc_score(one_hot(targ, self.n_class).numpy(), one_hot(pred, self.n_class).numpy())
+        trn_acc = np.mean((np.array(pred) == np.array(targ)))
+        trn_auc = roc_auc_score(targ, prob)
         trn_loss = loss.item()/num_batches
         
         adj = self.GraphConstruct(hidden_matrix)
-        graph_loss = GraphConstructLoss(hidden_matrix, adj, self.hyperpm.theta_smooth, self.hyperpm.theta_degree, self.hyperpm.theta_sparsity)
+        graph_loss = GraphConstructLoss(hidden_matrix, adj, self.hyperpm.theta_smooth, self.hyperpm.theta_degree, self.hyperpm.theta_sparsity, dev)
         adj = {'adj':adj, 'label':np.array(targ)}
         loss += graph_loss
         loss.backward()
@@ -149,25 +151,25 @@ class EvalHelper:
         val_acc, val_auc, val_loss = None, None, None
         
         if test != False:
-            loss, pred, tst_targ = 0, [], []
+            loss, prob, pred, tst_targ = 0, [], [], []
             if test == 'val':
                 val_loader = self.val_loader
             else:
                 val_loader = self.tst_loader
-            num_batches, size = len(val_loader), len(val_loader.dataset)
+            num_batches = len(val_loader)
             
             for i, (feat, label) in enumerate(val_loader):
                 feat, label = feat.float().to(dev), label.long().to(dev)
-                prob, hidden, attn = self.ModalFusion(feat)
-                cls_loss = F.nll_loss(prob, label)
-                
-                pred.extend(prob.argmax(1).cpu().numpy())
+                output, hidden, attn = self.ModalFusion(feat)
+                cls_loss = F.nll_loss(output, label)
+                prob.extend(output.cpu().detach().numpy()[:, 1])
+                pred.extend(output.argmax(1).cpu().numpy())
                 tst_targ.extend(label.cpu().numpy())
                 loss += cls_loss.item()
                 
                 hidden_matrix = torch.cat([hidden_matrix,hidden],0)
-            val_acc = (np.array(pred) == np.array(tst_targ)).sum()/size
-            val_auc = roc_auc_score(one_hot(tst_targ, self.n_class).numpy(), one_hot(pred, self.n_class).numpy())
+            val_acc = np.mean((np.array(pred) == np.array(tst_targ)))
+            val_auc = roc_auc_score(tst_targ, prob)
             val_loss = loss/num_batches
             
             targ.extend(tst_targ)
@@ -178,50 +180,49 @@ class EvalHelper:
 
 
     def forward_graph(self, hidden_matrix, adj_dict, dev, test=False):
-        loss, pred, targ = 0, [], []
+        loss, prob, pred, targ = 0, [], [], []
         adj, label = adj_dict['adj'], adj_dict['label']
         np.save('adj.npy', adj.cpu().detach().numpy())
         normalized_adj = normalize_adj(adj + torch.eye(adj.size(0)).to(dev))
         sp_adj = sp.coo_matrix(normalized_adj.cpu().detach().numpy())
-        G = dgl.from_scipy(sp_adj).to(dev)
-        G.ndata['feat'] = hidden_matrix
-        G.ndata['label'] = torch.tensor(label).to(dev)
-        G.edata['w'] = torch.tensor(sp_adj.data).to(dev)
+        edge_index, edge_weight = from_scipy_sparse_matrix(sp_adj)
+        G = Data(x=hidden_matrix, 
+                 edge_index=edge_index, 
+                 edge_attr=edge_weight, 
+                 y=torch.tensor(label)).to(dev)
         
-        if test != False:
-            idx = list(range(G.num_nodes()))[-len(self.tst_idx):]
+        if test:
+            idx = list(range(G.num_nodes))[-len(self.tst_idx):]
         else:
-            idx = list(range(G.num_nodes()))
-        sampler = MultiLayerNeighborSampler([5,10])
-        node_loader = DataLoader(G,
-                                torch.tensor(idx).to(dev),
-                                sampler,
-                                batch_size=1000,
-                                shuffle=False,
-                                drop_last=False,
-                                num_workers=0)
-        num_batches, size = len(node_loader), len(node_loader.dataset)
-        for input_nodes, output_nodes, blocks in node_loader:
-            blocks = [b.to(dev) for b in blocks]
-            input_feat = blocks[0].srcdata['feat']
-            label = blocks[-1].dstdata['label']
-            prob = self.MessagePassing(blocks, input_feat)
-            cls_loss = F.nll_loss(prob, label)
-            #print('---------------------------')
-            #print(cls_loss)
+            idx = list(range(G.num_nodes))
+        node_loader =  NeighborLoader(G,
+                                      num_neighbors= [5, 10],
+                                      batch_size=64,
+                                      shuffle=False,
+                                      drop_last=False,
+                                      num_workers=0)
+        num_batches = len(node_loader)
+        for batch in node_loader: # batch is of type torch_geometric.data.Batch and inherits Data
+            batch = batch.to(dev)
+            label = batch.y
+            # print(num_batches, batch.x.shape, batch.edge_index.shape, batch.edge_attr.shape, batch.y.shape)
+            output = self.MessagePassing(batch.x, edge_index=batch.edge_index, edge_attr=batch.edge_attr)
+            num_root_nodes = batch.input_id.size(0) # Root nodes are always the first num_root_nodes in the batch
+            root_output = output[:num_root_nodes]
+            root_labels = batch.y[:num_root_nodes]
+            cls_loss = F.nll_loss(root_output, root_labels)
             cls_loss.backward()
-            pred.extend(prob.argmax(1).cpu().numpy())
-            targ.extend(label.cpu().numpy())
+            prob.extend(root_output.cpu().detach().numpy()[:, 1])
+            pred.extend(root_output.argmax(1).cpu().numpy())
+            targ.extend(root_labels.cpu().numpy())
             loss += cls_loss.item()
             
         
-        acc = (np.array(pred) == np.array(targ)).sum()/len(idx)
-        auc = roc_auc_score(one_hot(targ, self.n_class).numpy(), one_hot(pred, self.n_class).numpy())
+        acc = np.mean((np.array(pred) == np.array(targ)))
+        auc = roc_auc_score(targ, prob)
         loss = loss/num_batches
         
         return acc, auc, loss
-        
-        
             
         
     def run_epoch(self, mode, end = ''):

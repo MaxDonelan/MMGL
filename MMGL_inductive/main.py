@@ -12,7 +12,7 @@ import matplotlib.cm
 import networkx as nx
 import numpy as np
 import scipy.sparse as spsprs
-from sklearn.model_selection import KFold,StratifiedKFold
+from sklearn.model_selection import StratifiedGroupKFold
 import torch
 import torch.autograd
 import torch.nn as nn
@@ -77,12 +77,15 @@ def train_and_eval(datadir, datname, hyperpm):
     if datname == 'TADPOLE':
         hyperpm.nclass = 3
         hyperpm.nmodal = 6
+        groups = range(len(data))
     elif datname == 'ABIDE':
         hyperpm.nclass = 2
         hyperpm.nmodal = 4
+        groups = range(len(data))
     elif datname == "RADFUSION":
         hyperpm.nclass = 2
         hyperpm.nmodal = 2
+        groups = np.load(path + 'slice_level_idx.npy')
     #np.random.shuffle(data)
 
     input_data_dims = []
@@ -91,13 +94,13 @@ def train_and_eval(datadir, datname, hyperpm):
     print('Modal dims ', input_data_dims)
     input_data = data[:,:-1]
     label = data[:,-1]-1
-    skf = StratifiedKFold(n_splits=10, random_state=hyperpm.seed, shuffle=True)
+    skf = StratifiedGroupKFold(n_splits=10, random_state=hyperpm.seed, shuffle=True)
     val_acc, tst_acc, tst_auc = [], [], []
     shared_acc_list, shared_auc_list = [], []
     sp_acc_list, sp_auc_list = [], []
     sens = []
     clk = 0
-    for train_index, test_index in skf.split(input_data, label):
+    for train_index, test_index in skf.split(x=input_data, y=label, groups=groups):
         clk += 1
         agent = EvalHelper(input_data_dims, input_data, label, hyperpm, train_index, test_index, device=dev)
         tm = time.time()

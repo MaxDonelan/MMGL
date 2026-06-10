@@ -102,6 +102,18 @@ def preprocessing():
     pca_model = PCA(n_components=512, copy=False) # could use better intuition on this value
     slices_transformed = pca_model.fit_transform(X=slices, y=slice_level_labels)
 
+    # take only a random subset of slices for each scan
+    slice_level_idx_arr = np.array([range(len(slice_level_idx)), slice_level_idx])
+    selection = []
+    for idx in labels.idx:
+        subset = slice_level_idx_arr[slice_level_idx_arr[1] == idx]
+        if subset.shape[1] >= 5:
+            selection.extend(random.sample(subset[0], 5))
+        else:
+            selection.extend(subset[0])
+
+    slices_transformed = slices_transformed[selection]
+
     # EHR preprocessing
     print("Loading EHR...")    
     ehr = load_EHR(scratch_dir, labels)

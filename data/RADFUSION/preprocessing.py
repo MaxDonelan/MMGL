@@ -106,18 +106,24 @@ def preprocessing():
     slice_level_idx_arr = np.array([range(len(slice_level_idx)), slice_level_idx])
     selection = []
     for idx in labels.idx:
-        subset = slice_level_idx_arr[slice_level_idx_arr[1] == idx]
+        mask = slice_level_idx_arr[1] == idx
+        subset = slice_level_idx_arr[:, mask]
         if subset.shape[1] >= 5:
-            selection.extend(random.sample(subset[0], 5))
+            selection.extend(random.sample(list(subset[0]), 5))
         else:
-            selection.extend(subset[0])
+            selection.extend(list(subset[0]))
 
+    slice_level_idx = np.array(slice_level_idx)[selection]
+    slice_level_labels = np.array(slice_level_labels)[selection]
     slices_transformed = slices_transformed[selection]
     print(f"Shape of slice-level data post-transformations: {slices_transformed.shape}")
 
     # EHR preprocessing
     print("Loading EHR...")    
-    ehr = load_EHR(scratch_dir, labels)
+    ehr = load_EHR(scratch_dir, labels)#.drop_duplicates("idx")
+    print(ehr.shape)
+    ehr = ehr.drop_duplicates("idx")
+    print(ehr.shape)
 
     print("Performing feature selection...")
     estimator = RidgeClassifier()

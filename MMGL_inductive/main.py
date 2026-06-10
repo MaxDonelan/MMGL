@@ -1,23 +1,13 @@
 import argparse
-import os
-import pickle
-import random
 import sys
 import tempfile
 import time
 import warnings
-
 import gc
-import matplotlib.cm
-import networkx as nx
+
 import numpy as np
-import scipy.sparse as spsprs
-from sklearn.model_selection import KFold,StratifiedKFold
+from sklearn.model_selection import StratifiedGroupKFold
 import torch
-import torch.autograd
-import torch.nn as nn
-import torch.nn.functional as fn
-import torch.optim as optim
 import pandas as pd
 from network import *
 from utils import *
@@ -41,32 +31,6 @@ class RedirectStdStreams:
         sys.stderr = self.old_stderr
     
     
-def sen(con_mat,n):# n is the number of categories
-    
-    sen = []
-    for i in range(n):
-        tp = con_mat[i][i]
-        fn = np.sum(con_mat[i,:]) - tp
-        sen1 = tp / (tp + fn)
-        sen.append(sen1)
-        
-    return sen
-
-def spe(con_mat,n):
-    
-    spe = []
-    for i in range(n):
-        number = np.sum(con_mat[:,:])
-        tp = con_mat[i][i]
-        fn = np.sum(con_mat[i,:]) - tp
-        fp = np.sum(con_mat[:,i]) - tp
-        tn = number - tp - fn - fp
-        spe1 = tn / (tn + fp)
-        spe.append(spe1)
-    
-    return spe
-    
-    
 def train_and_eval(datadir, datname, hyperpm):
     torch_geometric.seed_everything(hyperpm.seed)
     dev = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -77,13 +41,15 @@ def train_and_eval(datadir, datname, hyperpm):
     if datname == 'TADPOLE':
         hyperpm.nclass = 3
         hyperpm.nmodal = 6
+        groups = range(data.shape[0])
     elif datname == 'ABIDE':
         hyperpm.nclass = 2
         hyperpm.nmodal = 4
+        groups = range(data.shape[0])
     elif datname == "RADFUSION":
         hyperpm.nclass = 2
         hyperpm.nmodal = 2
-    #np.random.shuffle(data)
+        groups = np.load(path + 'slice_level_idx.npy')
 
     input_data_dims = []
     for i in modal_feat_dict.keys():
@@ -91,14 +57,9 @@ def train_and_eval(datadir, datname, hyperpm):
     print('Modal dims ', input_data_dims)
     input_data = data[:,:-1]
     label = data[:,-1]-1
-    skf = StratifiedKFold(n_splits=10, random_state=hyperpm.seed, shuffle=True)
+    cv = StratifiedGroupKFold(n_splits=10, random_state=hyperpm.seed, shuffle=True)
     val_acc, tst_acc, tst_auc = [], [], []
-    shared_acc_list, shared_auc_list = [], []
-    sp_acc_list, sp_auc_list = [], []
-    sens = []
-    clk = 0
-    for train_index, test_index in skf.split(input_data, label):
-        clk += 1
+    for fold, (train_index, test_index) in enumerate(cv.split(X=input_data, y=label, groups=groups)):
         agent = EvalHelper(input_data_dims, input_data, label, hyperpm, train_index, test_index, device=dev)
         tm = time.time()
         best_val_acc, wait_cnt = 0.0, 0
@@ -132,7 +93,7 @@ def train_and_eval(datadir, datname, hyperpm):
         
         tst_acc.append(cur_tst_acc)
         tst_auc.append(cur_tst_auc)
-        if np.array(tst_acc).mean() < 0.6 and clk == 5:
+        if np.array(tst_acc).mean() < 0.6 and fold == 5:
             break
     return np.array(val_acc).mean(), np.array(tst_acc).mean(), np.array(tst_acc).std(), np.array(tst_auc).mean(), np.array(tst_auc).std()
 

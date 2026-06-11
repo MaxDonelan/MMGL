@@ -57,7 +57,7 @@ def load_EHR(dir: Path, labels):
     return ehr
 
 
-def preprocessing():
+def preprocessing(slice_limit):
     """
     Perform data preprocessing on the RadFusion dataset to format it for MMGL.
     """
@@ -86,11 +86,13 @@ def preprocessing():
     slices = []
     slice_level_labels = []
     slice_level_idx = []
+    slice_level_split = []
     for i, path in enumerate(ct_scan_paths):
         slc_set = process_scan(path, slice_classifier, cutoff)
         if slc_set is not None:
             slice_level_labels.extend([labels.label[i]] * slc_set.shape[0])
             slice_level_idx.extend([labels.idx[i]] * slc_set.shape[0])
+            slice_level_split.extend([labels.split[i]] * slc_set.shape[0])
             slices.extend(slc_set)
         if i % 10 == 9:
             print(f"Processed scan {i+1}")
@@ -100,11 +102,29 @@ def preprocessing():
 
     print("Performing PCA...")
     pca_model = PCA(n_components=512, copy=False) # could use better intuition on this value
-    slices_transformed = pca_model.fit_transform(X=slices, y=slice_level_labels)
+    slices_transformed = pca_model.fit_transform(X=slices)
+
+    # take only a random subset of slices for each scan
+    if slice_limit is not None:
+        slice_level_idx_arr = np.array([range(len(slice_level_idx)), slice_level_idx])
+        selection = []
+        for idx in labels.idx:
+            mask = slice_level_idx_arr[1] == idx
+            subset = slice_level_idx_arr[:, mask]
+            if subset.shape[1] >= slice_limit:
+                selection.extend(random.sample(list(subset[0]), slice_limit))
+            else:
+                selection.extend(list(subset[0]))
+
+        slice_level_idx = np.array(slice_level_idx)[selection]
+        slice_level_labels = np.array(slice_level_labels)[selection]
+        slice_level_split = np.array(slice_level_split)[selection]
+        slices_transformed = slices_transformed[selection]
+        print(f"Shape of slice-level data post-transformations: {slices_transformed.shape}")
 
     # EHR preprocessing
     print("Loading EHR...")    
-    ehr = load_EHR(scratch_dir, labels)
+    ehr = load_EHR(scratch_dir, labels).drop_duplicates("idx")
 
     print("Performing feature selection...")
     estimator = RidgeClassifier()
@@ -135,21 +155,24 @@ def preprocessing():
     modal_feat_dict["EHR"] = transformed_tabular.drop(columns=["idx"]).columns
     modal_feat_dict["IMAGE"] = slices_df.drop(columns=["idx"]).columns
 
-    return radfusion, modal_feat_dict, np.array(slice_level_idx)
+    return radfusion, modal_feat_dict, np.array(slice_level_idx), np.array(slice_level_split) 
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, help="The random seed to use for all processes")
+    parser.add_argument("--slice_limit", type=int, default=None, help="A maximum number of slices to keep from each image")
 
     args = parser.parse_args()
     seed = args.seed
+    slice_limit = args.slice_limit
 
     if seed is not None:
         random.seed(seed)
 
-    prepared_data, modal_feat_dict, slice_level_idx = preprocessing()
+    prepared_data, modal_feat_dict, slice_level_idx, slice_level_split = preprocessing(slice_limit)
     prepared_data.to_csv("data/RADFUSION/processed_standard_data.csv")
     np.save("data/RADFUSION/modal_feat_dict.npy", modal_feat_dict)
     np.save("data/RADFUSION/slice_level_idx.npy", slice_level_idx)
+    np.save("data/RADFUSION/slice_level_split.npy", slice_level_split)
     print("Done.")

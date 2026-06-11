@@ -60,7 +60,7 @@ def train_and_eval(datadir, datname, hyperpm):
     cv = StratifiedGroupKFold(n_splits=10, random_state=hyperpm.seed, shuffle=True)
     val_acc, tst_acc, tst_auc = [], [], []
     for fold, (train_index, test_index) in enumerate(cv.split(X=input_data, y=label, groups=groups)):
-        agent = EvalHelper(input_data_dims, input_data, label, hyperpm, train_index, test_index, device=dev)
+        agent = EvalHelper(input_data_dims, input_data, label, hyperpm, train_index, test_index, test_index, device=dev)
         tm = time.time()
         best_val_acc, wait_cnt = 0.0, 0
         model_sav = tempfile.TemporaryFile()
@@ -97,6 +97,68 @@ def train_and_eval(datadir, datname, hyperpm):
             break
     return np.array(val_acc).mean(), np.array(tst_acc).mean(), np.array(tst_acc).std(), np.array(tst_auc).mean(), np.array(tst_auc).std()
 
+
+def train_eval_radfusion(datadir, datname, hyperpm):
+    torch_geometric.seed_everything(hyperpm.seed)
+    dev = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    path = datadir + datname + '/'
+    modal_feat_dict = np.load(path + 'modal_feat_dict.npy', allow_pickle=True).item()
+    data = pd.read_csv(path + 'processed_standard_data.csv').values
+    slice_level_idx = np.load(path + 'slice_level_idx.npy')
+    slice_level_split = np.load(path + 'slice_level_split.npy')
+    print('data shape: ', data.shape)
+
+    hyperpm.nclass = 2
+    hyperpm.nmodal = 2
+
+    input_data_dims = []
+    for i in modal_feat_dict.keys():
+        input_data_dims.append(len(modal_feat_dict[i]))
+    print('Modal dims ', input_data_dims)
+    input_data = data[:,:-1]
+    label = data[:,-1]-1
+    
+    train_mask = [slice_level_split == "train"]
+    val_mask = [slice_level_split == "val"]
+    test_mask = [slice_level_split == "test"]
+
+    train_index = np.array(range(data.shape[0]))[train_mask]
+    val_index = np.array(range(data.shape[0]))[val_mask]
+    test_index = np.array(range(data.shape[0]))[test_mask]
+
+    val_acc, tst_acc, tst_auc = [], [], []
+    agent = EvalHelper(input_data_dims, input_data, label, hyperpm, train_index, val_index, test_index, device=dev)
+    tm = time.time()
+    best_val_acc, wait_cnt = 0.0, 0
+    model_sav = tempfile.TemporaryFile()
+    for t in range(hyperpm.nepoch):
+        print('%3d/%d' % (t, hyperpm.nepoch), end=' ')
+        agent.run_epoch(mode = hyperpm.mode, end=' ')
+        _, cur_val_acc = agent.print_trn_acc(hyperpm.mode)
+        if cur_val_acc > best_val_acc:
+            wait_cnt = 0
+            best_val_acc = cur_val_acc
+            model_sav.close()
+            model_sav = tempfile.TemporaryFile()
+            dict_list = [agent.ModalFusion.state_dict(),
+                            agent.GraphConstruct.state_dict(),
+                            agent.MessagePassing.state_dict()]
+            torch.save(dict_list, model_sav)
+        else:
+            wait_cnt += 1
+            if wait_cnt > hyperpm.early:
+                break
+    print("time: %.4f sec." % (time.time() - tm))
+    model_sav.seek(0)
+    dict_list = torch.load(model_sav)
+    agent.ModalFusion.load_state_dict(dict_list[0])
+    agent.GraphConstruct.load_state_dict(dict_list[1])
+    agent.MessagePassing.load_state_dict(dict_list[2])
+
+    val_acc.append(best_val_acc)
+    tst_acc, tst_auc = agent.print_tst_acc(hyperpm.mode)
+
+    return np.array(val_acc), np.array(tst_acc), np.array(tst_auc)
 
 def main(args_str=None):
     assert float(torch.__version__[:3]) + 1e-3 >= 0.4
@@ -153,9 +215,13 @@ def main(args_str=None):
         args = parser.parse_args(args_str.split())
     with RedirectStdStreams(stdout=sys.stderr):
         print('GC_mode:', args.GC_mode, 'MF_mode:', args.MF_mode)
-        val_acc, tst_acc, tst_acc_std, tst_auc, tst_auc_std = train_and_eval(args.datadir, args.datname, args)
-        print('val=%.2f%% tst_acc=%.2f%% tst_auc=%.2f%%' % (val_acc * 100, tst_acc * 100, tst_auc * 100))
-        print('tst_acc_std=%.4f tst_auc_std=%.4f' % (tst_acc_std, tst_auc_std))
+        if args.datname == "RADFUSION":
+            val_acc, tst_acc, tst_auc = train_eval_radfusion(args.datadir, args.datname, args)
+            print('val=%.2f%% tst_acc=%.2f%% tst_auc=%.2f%%' % (val_acc * 100, tst_acc * 100, tst_auc * 100))
+        else:
+            val_acc, tst_acc, tst_acc_std, tst_auc, tst_auc_std = train_and_eval(args.datadir, args.datname, args)
+            print('mean val=%.2f%% mean tst_acc=%.2f%% mean tst_auc=%.2f%%' % (val_acc * 100, tst_acc * 100, tst_auc * 100))
+            print('tst_acc_std=%.4f tst_auc_std=%.4f' % (tst_acc_std, tst_auc_std))
     return val_acc, tst_acc
 
 

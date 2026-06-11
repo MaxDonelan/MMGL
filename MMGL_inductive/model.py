@@ -42,7 +42,7 @@ class disease_dataset(Dataset):
 
 
 class EvalHelper:
-    def __init__(self, input_data_dims, feat, label, hyperpm, train_index, test_index, device):
+    def __init__(self, input_data_dims, feat, label, hyperpm, train_index, val_index, test_index, device):
         #feat = torch.from_numpy(feat).float().to(dev)
         #label = torch.from_numpy(label).long().to(dev)
         self.dev = device
@@ -64,8 +64,8 @@ class EvalHelper:
         self.MF_sav = tempfile.TemporaryFile()
         self.GCMP_sav = tempfile.TemporaryFile()
         num = train_index.shape[0]
-        self.trn_idx = train_index
-        self.val_idx = np.array(test_index)
+        self.trn_idx = np.array(train_index)
+        self.val_idx = np.array(val_index)
         self.tst_idx = np.array(test_index)
         
         self.trn_dataset = disease_dataset(feat, label, self.trn_idx)

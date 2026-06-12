@@ -13,7 +13,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import Dataset
 from collections import Counter
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import roc_auc_score, roc_curve
 import matplotlib.cm
 import networkx as nx 
 from sklearn.metrics import confusion_matrix
@@ -222,7 +222,7 @@ class EvalHelper:
         auc = roc_auc_score(targ, prob)
         loss = loss/num_batches
         
-        return acc, auc, loss
+        return acc, auc, loss, prob, targ
             
         
     def run_epoch(self, mode, end = ''):
@@ -256,7 +256,7 @@ class EvalHelper:
             self.optimizer_GC.zero_grad()
             self.optimizer_MP.zero_grad()
             _, _, hidden_matrix, adj = self.forward_MF(dev)
-            acc, auc, loss = self.forward_graph(hidden_matrix.detach(), adj, dev)
+            acc, auc, loss, pred, targ = self.forward_graph(hidden_matrix.detach(), adj, dev)
             self.optimizer_MF.step()
             self.optimizer_GC.step()
             self.optimizer_MP.step()
@@ -294,4 +294,18 @@ class EvalHelper:
         return acc, auc
         
         
+    def get_balanced_cutoff(targ, prob):
+        fpr, tpr, thres = roc_curve(targ, prob)
+        tnr = 1 - fpr
+        balanced_thres = np.argmin(abs(tpr - tnr))
+        return fpr[balanced_thres], tpr[balanced_thres], thres[balanced_thres]
+    
+    def get_class_probabilities(self):
+        self.ModalFusion.eval()
+        self.GraphConstruct.eval()
+        self.MessagePassing.eval()
+        with torch.no_grad():
+            _, _, hidden_matrix, adj = self.forward_MF(self.dev, test = "val")
+            _, _, _, pred, targ = self.forward_graph(hidden_matrix.detach(), adj, self.dev, test = "val")
+            return pred, targ
         

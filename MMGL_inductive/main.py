@@ -4,7 +4,7 @@ import warnings
 import gc
 
 import numpy as np
-from sklearn.model_selection import StratifiedGroupKFold
+from sklearn.model_selection import StratifiedKFold
 import torch
 import pandas as pd
 import torch_geometric
@@ -43,15 +43,9 @@ def train_and_eval(datadir, datname, hyperpm):
     if datname == 'TADPOLE':
         hyperpm.nclass = 3
         hyperpm.nmodal = 6
-        groups = range(data.shape[0])
     elif datname == 'ABIDE':
         hyperpm.nclass = 2
         hyperpm.nmodal = 4
-        groups = range(data.shape[0])
-    elif datname == "RADFUSION":
-        hyperpm.nclass = 2
-        hyperpm.nmodal = 2
-        groups = np.load(path + 'slice_level_idx.npy')
 
     input_data_dims = []
     for i in modal_feat_dict.keys():
@@ -59,9 +53,9 @@ def train_and_eval(datadir, datname, hyperpm):
     print('Modal dims ', input_data_dims)
     input_data = data[:,:-1]
     label = data[:,-1]-1
-    cv = StratifiedGroupKFold(n_splits=10, random_state=hyperpm.seed, shuffle=True)
+    cv = StratifiedKFold(n_splits=10, random_state=hyperpm.seed, shuffle=True)
     val_acc, tst_acc, tst_auc = [], [], []
-    for fold, (train_index, test_index) in enumerate(cv.split(X=input_data, y=label, groups=groups)):
+    for fold, (train_index, test_index) in enumerate(cv.split(X=input_data, y=label)):
         mmgl = MMGL(input_data_dims=input_data_dims,
                     hyperpm=hyperpm,
                     device=dev)

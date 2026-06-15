@@ -1,7 +1,5 @@
 import argparse
 import sys
-import tempfile
-import time
 import warnings
 import gc
 
@@ -9,10 +7,13 @@ import numpy as np
 from sklearn.model_selection import StratifiedGroupKFold
 import torch
 import pandas as pd
+import torch_geometric
+
 from network import *
 from utils import *
 from model import *
 from mmgl import *
+
 
 class RedirectStdStreams:
     def __init__(self, stdout=None, stderr=None):
@@ -61,36 +62,6 @@ def train_and_eval(datadir, datname, hyperpm):
     cv = StratifiedGroupKFold(n_splits=10, random_state=hyperpm.seed, shuffle=True)
     val_acc, tst_acc, tst_auc = [], [], []
     for fold, (train_index, test_index) in enumerate(cv.split(X=input_data, y=label, groups=groups)):
-        # agent = EvalHelper(input_data_dims, input_data, label, hyperpm, train_index, test_index, test_index, device=dev)
-        # tm = time.time()
-        # best_val_acc, wait_cnt = 0.0, 0
-        # model_sav = tempfile.TemporaryFile()
-        # for t in range(hyperpm.nepoch):
-        #     print('%3d/%d' % (t, hyperpm.nepoch), end=' ')
-        #     agent.run_epoch(mode = hyperpm.mode, end=' ')
-        #     _, cur_val_acc = agent.print_trn_acc(hyperpm.mode)
-        #     if cur_val_acc > best_val_acc:
-        #         wait_cnt = 0
-        #         best_val_acc = cur_val_acc
-        #         model_sav.close()
-        #         model_sav = tempfile.TemporaryFile()
-        #         dict_list = [agent.ModalFusion.state_dict(),
-        #                      agent.GraphConstruct.state_dict(),
-        #                      agent.MessagePassing.state_dict()]
-        #         torch.save(dict_list, model_sav)
-        #     else:
-        #         wait_cnt += 1
-        #         if wait_cnt > hyperpm.early:
-        #             break
-        # print("time: %.4f sec." % (time.time() - tm))
-        # model_sav.seek(0)
-        # dict_list = torch.load(model_sav)
-        # agent.ModalFusion.load_state_dict(dict_list[0])
-        # agent.GraphConstruct.load_state_dict(dict_list[1])
-        # agent.MessagePassing.load_state_dict(dict_list[2])
-
-        # val_acc.append(best_val_acc)
-        # cur_tst_acc, cur_tst_auc = agent.print_tst_acc(hyperpm.mode)
         mmgl = MMGL(input_data_dims=input_data_dims,
                     hyperpm=hyperpm,
                     device=dev)
@@ -106,7 +77,6 @@ def train_and_eval(datadir, datname, hyperpm):
         print(f"Current Test Acc: {cur_test_acc:.4f} | Current Test AUC: {cur_test_auc:.4f}")
        # print(f"FPR: {fpr} | TPR: {tpr} | Cutoff: {cutoff}")
 
-        
         tst_acc.append(cur_test_acc)
         tst_auc.append(cur_test_auc)
         if np.array(tst_acc).mean() < 0.6 and fold == 5:
@@ -114,6 +84,7 @@ def train_and_eval(datadir, datname, hyperpm):
     
     print(f"Mean Test Acc: {np.array(tst_acc).mean():.4f} | Mean Test AUC: {np.array(tst_auc).mean():.4f}")
     print(f"Test Acc Std.: {np.array(tst_acc).std():.4f} | Test AUC Std.: {np.array(tst_auc).std():.4f}")
+    
     return mmgl
 
 def train_eval_radfusion(datadir, datname, hyperpm):
@@ -145,39 +116,6 @@ def train_eval_radfusion(datadir, datname, hyperpm):
     val_index = np.array(range(data.shape[0]))[val_mask]
     test_index = np.array(range(data.shape[0]))[test_mask]
 
-    # val_acc, tst_acc, tst_auc = [], [], []
-    # agent = EvalHelper(input_data_dims, input_data, label, hyperpm, train_index, val_index, test_index, device=dev)
-    # tm = time.time()
-    # best_val_acc, wait_cnt = 0.0, 0
-    # model_sav = tempfile.TemporaryFile()
-    # for t in range(hyperpm.nepoch):
-    #     print('%3d/%d' % (t, hyperpm.nepoch), end=' ')
-    #     agent.run_epoch(mode = hyperpm.mode, end=' ')
-    #     _, cur_val_acc = agent.print_trn_acc(hyperpm.mode)
-    #     if cur_val_acc > best_val_acc:
-    #         wait_cnt = 0
-    #         best_val_acc = cur_val_acc
-    #         model_sav.close()
-    #         model_sav = tempfile.TemporaryFile()
-    #         dict_list = [agent.ModalFusion.state_dict(),
-    #                         agent.GraphConstruct.state_dict(),
-    #                         agent.MessagePassing.state_dict()]
-    #         torch.save(dict_list, model_sav)
-    #     else:
-    #         wait_cnt += 1
-    #         if wait_cnt > hyperpm.early:
-    #             break
-    # print("time: %.4f sec." % (time.time() - tm))
-    # model_sav.seek(0)
-    # dict_list = torch.load(model_sav)
-    # agent.ModalFusion.load_state_dict(dict_list[0])
-    # agent.GraphConstruct.load_state_dict(dict_list[1])
-    # agent.MessagePassing.load_state_dict(dict_list[2])
-
-    # val_acc.append(best_val_acc)
-    # tst_acc, tst_auc = agent.print_tst_acc(hyperpm.mode)
-    # targ, pred = agent.get_class_probabilities()
-    # fpr, tpr, cutoff = agent.get_balanced_cutoff(targ, pred)
     mmgl = MMGL(input_data_dims=input_data_dims,
                 hyperpm=hyperpm,
                 device=dev)
@@ -191,7 +129,7 @@ def train_eval_radfusion(datadir, datname, hyperpm):
     test_auc = roc_auc_score(test_labels, test_prob)
 
     print(f"FPR: {fpr:.4f} | TPR: {tpr:.4f} | Cutoff: {cutoff:.4f}")
-    print(f"Bal. Cutoff Test Acc: {test_acc:.4f} | Test AUC: {test_auc:.4f}")
+    print(f"Balanced Cutoff Test Acc: {test_acc:.4f} | Test AUC: {test_auc:.4f}")
 
     print(f"\nShape of test_prob: {test_prob.shape} | Shape of slice_level_idx: {slice_level_idx[test_index].shape}")
     to_group = pd.DataFrame({"prob": test_prob, "idx": slice_level_idx[test_index], "label": test_labels})
@@ -204,7 +142,7 @@ def train_eval_radfusion(datadir, datname, hyperpm):
 
     print("\n Results After Regrouping to the Image Level:")
     print(f"Grouped: FPR: {g_fpr:.4f} | TPR {g_tpr:.4f} | Cutoff: {grouped_cutoff:.4f}")
-    print(f"Grouped Bal. Cutoff Test Acc: {grouped_acc:.4f} | Grouped Test AUC: {grouped_auc:.4f}")
+    print(f"Grouped Balanced Cutoff Test Acc: {grouped_acc:.4f} | Grouped Test AUC: {grouped_auc:.4f}")
 
     return mmgl
 
@@ -267,8 +205,6 @@ def main(args_str=None):
             mmgl = train_eval_radfusion(args.datadir, args.datname, args)
         else:
             mmgl = train_and_eval(args.datadir, args.datname, args)
-            #print('mean val=%.2f%% mean tst_acc=%.2f%% mean tst_auc=%.2f%%' % (val_acc * 100, tst_acc * 100, tst_auc * 100))
-            #print('tst_acc_std=%.4f tst_auc_std=%.4f' % (tst_acc_std, tst_auc_std))
 
 
 if __name__ == '__main__':

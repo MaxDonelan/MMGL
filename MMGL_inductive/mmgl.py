@@ -1,4 +1,5 @@
 import tempfile
+import time
 
 import numpy as np
 import torch
@@ -245,7 +246,7 @@ class MMGL:
                 pred = np.where(prob > 0.5, 1, 0)
                 train_auc = roc_auc_score(labels, prob)
                 train_acc = np.mean((np.array(pred) == np.array(labels)))
-                print(f'Train MF Loss: {mf_loss:.4f} | Train GC Loss : {gc_loss:.4f} | Train Graph Loss {graph_loss:.4f} |', end=' ')
+                print(f'Train MF Loss: {mf_loss:.4f} | Train GC Loss: {gc_loss:.4f} | Train Graph Loss {graph_loss:.4f} |', end=' ')
                 print(f'Train AUC: {train_auc:.4f} | Train Acc: {train_acc:.4f} |', end=' ')
 
 

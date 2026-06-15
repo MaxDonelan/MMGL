@@ -122,7 +122,6 @@ def train_eval_radfusion(datadir, datname, hyperpm):
     path = datadir + datname + '/'
     modal_feat_dict = np.load(path + 'modal_feat_dict.npy', allow_pickle=True).item()
     data = pd.read_csv(path + 'processed_standard_data.csv').values
-    print(data[-50::5, :50:5])
 
     slice_level_idx = np.load(path + 'slice_level_idx.npy')
     slice_level_split = np.load(path + 'slice_level_split.npy')
@@ -192,7 +191,21 @@ def train_eval_radfusion(datadir, datname, hyperpm):
     test_auc = roc_auc_score(test_labels, test_prob)
 
     print(f"FPR: {fpr:.4f} | TPR: {tpr:.4f} | Cutoff: {cutoff:.4f}")
-    print(f"Opt. Cutoff Test Acc: {test_acc:.4f} | Test AUC: {test_auc:.4f}")
+    print(f"Bal. Cutoff Test Acc: {test_acc:.4f} | Test AUC: {test_auc:.4f}")
+
+    print(f"\nShape of test_prob: {test_prob.shape} | Shape of slice_level_idx: {slice_level_idx[test_index].shape}")
+    to_group = pd.DataFrame({"prob": test_prob, "idx": slice_level_idx[test_index], "label": test_labels})
+    grouped_prob = to_group.groupby(["idx"])["prob"].mean()
+    grouped_labels = to_group.groupby(["idx"])["label"].mean()
+    g_fpr, g_tpr, grouped_cutoff = get_balanced_cutoff(grouped_labels, grouped_prob)
+    grouped_pred = np.where(grouped_prob > grouped_cutoff, 1, 0)
+    grouped_acc = np.mean((np.array(grouped_pred) == np.array(grouped_labels)))
+    grouped_auc = roc_auc_score(grouped_labels, grouped_prob)
+
+    print("\n Results After Regrouping to the Image Level:")
+    print(f"Grouped: FPR: {g_fpr:.4f} | TPR {g_tpr:.4f} | Cutoff: {grouped_cutoff:.4f}")
+    print(f"Grouped Bal. Cutoff Test Acc: {grouped_acc:.4f} | Grouped Test AUC: {grouped_auc:.4f}")
+
     return mmgl
 
 def main(args_str=None):

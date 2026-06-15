@@ -1,25 +1,11 @@
-import argparse
-import os
-import pickle
-import random
-import sys
-import tempfile
-import time
-
-import gc
-import matplotlib.cm
-import networkx as nx
 import numpy as np
-import scipy.sparse as spsprs
 import torch
-import torch.autograd
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.optim as optim
-import math
-from layers import *
-import torch_geometric
 from torch_geometric.nn import GCNConv
+
+from layers import *
+
 
 
 class VLTransformer(nn.Module):
@@ -159,10 +145,11 @@ class GraphLearn(nn.Module):
             markoff_value = 0
             output = score * mask + markoff_value * (1 - mask)
         
-        if test == True:
-            mask = torch.ones(output.shape)
-            mask[-bs:][-bs:] = torch.zeros((bs, bs))
-            output = output * mask
+        # I don't think this is necessary considering training nodes are filtered out by the sampler during testing.
+        # if test == True:
+        #     mask = torch.ones(output.shape)
+        #     mask[-bs:][-bs:] = torch.zeros((bs, bs))
+        #     output = output * mask
         return output
     
     

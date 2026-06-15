@@ -1,17 +1,13 @@
 import os
-import random
-import sys
 
 import networkx as nx
 import numpy as np
-import scipy.sparse as spsprs
 import torch
-import torch.autograd
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.optim as optim
 import matplotlib.cm
 import networkx as nx 
+from scipy.spatial import distance
 
 from network import *
 
@@ -41,6 +37,7 @@ def GraphConstructLoss(feat, adj, theta_smooth, theta_degree, theta_sparsity, de
 def ClsLoss(output, labels, idx, weight):
     
     return F.nll_loss(output[idx], labels[idx], weight)
+
 
 def ClsLoss_noweight(output, labels, idx):
     
@@ -72,6 +69,7 @@ def KNN_graph(x_data, topk=100, markoff_value=0):
     knn_val, knn_ind = torch.topk(attention, topk, dim=-1)
     weighted_adjacency_matrix = (markoff_value * torch.ones_like(attention)).scatter_(-1, knn_ind, knn_val)
     return weighted_adjacency_matrix
+
 
 def my_weight_init(m):
     if isinstance(m, nn.Linear):

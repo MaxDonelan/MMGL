@@ -1,22 +1,8 @@
-import argparse
-import os
-import pickle
-import random
-import sys
-import tempfile
-import time
-
-import gc
-import matplotlib.cm
-import networkx as nx
 import numpy as np
-import scipy.sparse as spsprs
 import torch
-import torch.autograd
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.optim as optim
-import math
+
 
 class Attention(nn.Module):
     def __init__(self, temperature, attn_dropout=0.1):
@@ -36,6 +22,7 @@ class Attention(nn.Module):
         output = torch.matmul(attn, v)
 
         return output, attn, v
+
 
 class FeedForwardLayer(nn.Module):
 
@@ -58,6 +45,7 @@ class FeedForwardLayer(nn.Module):
 
         return x    
     
+
 class VariLengthInputLayer(nn.Module):
     def __init__(self, input_data_dims, d_k, d_v, n_head, dropout):
         super(VariLengthInputLayer, self).__init__()
@@ -121,7 +109,8 @@ class VariLengthInputLayer(nn.Module):
         q = self.layer_norm(q)
         
         return q, attn
-    
+
+
 class EncodeLayer(nn.Module):
     def __init__(self, d_model, d_k, d_v, n_head, dropout):
         super(EncodeLayer, self).__init__()
@@ -152,6 +141,7 @@ class EncodeLayer(nn.Module):
         q += residual
         q = self.layer_norm(q)
         return q, attn
+
 
 class OutputLayer(nn.Module):
     def __init__(self, d_in, d_hidden, n_classes, modal_num, dropout = 0.5):
@@ -196,6 +186,7 @@ class GraphConv(nn.Module):
         #else:
         return output
 
+
 class FusionGate(nn.Module):
     def __init__(self, channel, reduction=1):
         super(FusionGate, self).__init__()
@@ -212,6 +203,7 @@ class FusionGate(nn.Module):
         y = self.avg_pool(x).view(b, c)
         y = self.fc(y).view(b, c, 1)
         return x * y.expand_as(x), y.sum(-2)
+
 
 class GraphAttConv(nn.Module):
     def __init__(self, in_features, out_features, dropout, alpha, concat=True):
@@ -252,4 +244,3 @@ class GraphAttConv(nn.Module):
             all_combinations_matrix = torch.cat([Wh_repeated_in_chunks, Wh_repeated_alternating], dim=1)
 
             return all_combinations_matrix.view(N, N, 2 * self.out_features)
-        

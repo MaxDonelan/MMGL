@@ -11,7 +11,6 @@ import torch_geometric
 
 from network import *
 from utils import *
-from model import *
 from mmgl import *
 
 

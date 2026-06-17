@@ -25,12 +25,13 @@ Our work was performed on Linux. We hope that creating a python environment desc
 * torch-geometric 2.7.0
 * scikit-learn 1.8.0
 * matplotlib 3.10.8
+* hyperopt 0.2.7
 
 ### Code
 
 For more details on code, see:
-* MMGL inductive:
-* RadFusion data preprocessing: 
+* MMGL inductive: [MMGL_inductive/README](https://github.com/MaxDonelan/MMGL/blob/main/MMGL_inductive/README.md)
+* RadFusion data preprocessing: [data/RADFUSION/README](https://github.com/MaxDonelan/MMGL/blob/main/data/RADFUSION/README.md)
 
 # (Semi-)Original README
 > We made some grammar edits and removed the misleading "Requirements" section.

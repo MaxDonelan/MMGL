@@ -30,8 +30,8 @@ Our work was performed on Linux. We hope that creating a python environment desc
 ### Code
 
 For more details on code, see:
-* MMGL inductive: [MMGL_inductive/README](https://github.com/MaxDonelan/MMGL/blob/main/MMGL_inductive/README.md)
-* RadFusion data preprocessing: [data/RADFUSION/README](https://github.com/MaxDonelan/MMGL/blob/main/data/RADFUSION/README.md)
+* MMGL inductive: [MMGL_inductive/README.md](https://github.com/MaxDonelan/MMGL/blob/main/MMGL_inductive/README.md)
+* RadFusion data preprocessing: [data/RADFUSION/README.md](https://github.com/MaxDonelan/MMGL/blob/main/data/RADFUSION/README.md)
 
 # (Semi-)Original README
 > We made some grammar edits and removed the misleading "Requirements" section.

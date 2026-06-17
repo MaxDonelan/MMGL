@@ -14,6 +14,7 @@ Briefly, we add/change:
 * We have also only tested the "weighted-cosine" graph construction method
 * While the original MMGL inductive version did not support the GAT message passing mode, ours does not either.
 * We have not tested the "sum" modal fusion mode
+* We have not tested inductive MMGL on the TADPOLE dataset
 
 ### Requirements
 Our work was performed on Linux. We hope that creating a python environment described by `requirements.txt` will allow our code to be easily rerun. That being said, computers are computers, and if you are having trouble recreating the environment, you should only need the following to run our code:

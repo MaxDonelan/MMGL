@@ -1,4 +1,4 @@
-# Multi-modal Graph Learning for Disease Prediction (MMGL)
+# Multi-Modal Graph Learning for Disease Prediction (MMGL)
 
 This is a fork of the original MMGL code which adds support for the RadFusion dataset on pulmonary embolism. **Our modifications solely target the inductive version of MMGL; no changes were made to the Transductive version.**
 

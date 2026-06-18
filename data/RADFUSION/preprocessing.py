@@ -114,9 +114,39 @@ def preprocessing(slice_limit, checkpoint):
         print(f"Original Number of Slices: {total_slices}")
         print(f"Shape of slice-level data: {slices.shape}")
 
+        train_mask = slice_level_split == "train"
+        val_mask = slice_level_split == "val"
+        test_mask = slice_level_split == "test"
+
+        train_index = np.array(range(slices.shape[0]))[train_mask]
+        val_index = np.array(range(slices.shape[0]))[val_mask]
+        test_index = np.array(range(slices.shape[0]))[test_mask]
+
+        train_set = slices[train_index]
+        val_set = slices[val_index]
+        test_set = slices[test_index]
+
+        train_labels = slice_level_labels[train_index]
+        val_labels = slice_level_labels[val_index]
+        test_labels = slice_level_labels[test_index]
+        train_idx = slice_level_idx[train_index]
+        val_idx = slice_level_idx[val_index]
+        test_idx = slice_level_idx[test_index]
+        train_split = slice_level_split[train_index]
+        val_split = slice_level_split[val_index]
+        test_split = slice_level_split[test_index]
+
         print("Performing PCA...")
-        pca_model = PCA(n_components=512, copy=False) # could use better intuition on this value
-        slices_transformed = pca_model.fit_transform(X=slices)
+        pca_model = PCA(n_components=512, copy=True) # could use better intuition on this value
+        pca_model = pca_model.fit(X=train_set)
+        train_transformed = pca_model.transform(X=train_set)
+        val_transformed = pca_model.transform(X=val_set)
+        test_transformed = pca_model.transform(X=test_set)
+
+        slices_transformed = np.concatenate(train_transformed, val_transformed, test_transformed)
+        slice_level_labels = np.concatenate(train_labels, val_labels, test_labels)
+        slice_level_idx = np.concatenate(train_idx, val_idx, test_idx)
+        slice_level_split = np.concatenate(train_split, val_split, test_split)
 
         np.save("data/RADFUSION/slices_transformed.npy", slices_transformed)
         np.save("data/RADFUSION/all_slice_level_idx.npy", slice_level_idx)

@@ -74,7 +74,7 @@ def preprocessing(slice_limit, checkpoint):
     print("Starting preprocessing...")
     scratch_dir = Path("/scratch/jacks.local/mrdonelan/radfusion/multimodalpulmonaryembolismdataset/")
     labels_path = scratch_dir / "Labels.csv"
-    labels = pd.read_csv(labels_path, index_col=0).head(5)
+    labels = pd.read_csv(labels_path, index_col=0).head(25)
     
     device = "cuda" if torch.cuda.is_available() else "cpu"
     cnn = torch.load("data/RADFUSION/trained_cnn.pt", map_location=device)
@@ -114,27 +114,29 @@ def preprocessing(slice_limit, checkpoint):
         print(f"Original Number of Slices: {total_slices}")
         print(f"Shape of slice-level data: {slices.shape}")
 
-        train_mask = slice_level_split == "train"
-        val_mask = slice_level_split == "val"
-        test_mask = slice_level_split == "test"
+        train_mask = np.array(slice_level_split) == "train"
+        val_mask = np.array(slice_level_split) == "val"
+        test_mask = np.array(slice_level_split) == "test"
 
         train_index = np.array(range(slices.shape[0]))[train_mask]
         val_index = np.array(range(slices.shape[0]))[val_mask]
         test_index = np.array(range(slices.shape[0]))[test_mask]
+        print(train_mask)
 
         train_set = slices[train_index]
         val_set = slices[val_index]
         test_set = slices[test_index]
+        print(train_set.shape)
 
-        train_labels = slice_level_labels[train_index]
-        val_labels = slice_level_labels[val_index]
-        test_labels = slice_level_labels[test_index]
-        train_idx = slice_level_idx[train_index]
-        val_idx = slice_level_idx[val_index]
-        test_idx = slice_level_idx[test_index]
-        train_split = slice_level_split[train_index]
-        val_split = slice_level_split[val_index]
-        test_split = slice_level_split[test_index]
+        train_labels = np.array(slice_level_labels)[train_index]
+        val_labels = np.array(slice_level_labels)[val_index]
+        test_labels = np.array(slice_level_labels)[test_index]
+        train_idx = np.array(slice_level_idx)[train_index]
+        val_idx = np.array(slice_level_idx)[val_index]                       
+        test_idx = np.array(slice_level_idx)[test_index]
+        train_split = np.array(slice_level_split)[train_index]
+        val_split = np.array(slice_level_split)[val_index]
+        test_split = np.array(slice_level_split)[test_index]
 
         print("Performing PCA...")
         pca_model = PCA(n_components=512, copy=True) # could use better intuition on this value
@@ -143,10 +145,11 @@ def preprocessing(slice_limit, checkpoint):
         val_transformed = pca_model.transform(X=val_set)
         test_transformed = pca_model.transform(X=test_set)
 
-        slices_transformed = np.concatenate(train_transformed, val_transformed, test_transformed)
-        slice_level_labels = np.concatenate(train_labels, val_labels, test_labels)
-        slice_level_idx = np.concatenate(train_idx, val_idx, test_idx)
-        slice_level_split = np.concatenate(train_split, val_split, test_split)
+        slices_transformed = np.vstack([train_transformed, val_transformed, test_transformed])
+        slice_level_labels = np.concatenate([train_labels, val_labels, test_labels])
+        slice_level_idx = np.concatenate([train_idx, val_idx, test_idx])
+        slice_level_split = np.concatenate([train_split, val_split, test_split])
+        print(slices_transformed.shape)
 
         np.save("data/RADFUSION/slices_transformed.npy", slices_transformed)
         np.save("data/RADFUSION/all_slice_level_idx.npy", slice_level_idx)
@@ -183,17 +186,22 @@ def preprocessing(slice_limit, checkpoint):
     print(f"EHR Shape: {ehr.shape}")
     print(f"Missing: {ehr.isna().values.any()}")
 
+    train_ind = labels.split == "train"
+    ehr_train = ehr[train_ind]
+
     print("Performing feature selection...")
     estimator = RidgeClassifier()
-    predictors = normalize(ehr.drop(columns=["idx", "label", "split_x", "split", "split_y"]))
-    response = ehr["label"]
+    predictors_train = normalize(ehr_train.drop(columns=["idx", "label", "split_x", "split", "split_y"]))
+    ehr_idx = ehr["idx"].values
+    ehr = normalize(ehr.drop(columns=["idx", "label", "split_x", "split", "split_y"]))
+    response = ehr_train["label"]
 
     selector = RFE(estimator, n_features_to_select=512, step=25, verbose=1)
-    selector = selector.fit(X=predictors, y=response)
+    selector = selector.fit(X=predictors_train, y=response)
     features_selected = selector.get_feature_names_out()
-    transformed_tabular = selector.transform(predictors)
+    transformed_tabular = selector.transform(ehr)
     transformed_tabular = pd.DataFrame(transformed_tabular, columns=features_selected)
-    transformed_tabular["idx"] = ehr["idx"].values
+    transformed_tabular["idx"] = ehr_idx
 
     # merging modalities
     print("Merging Modalities...")

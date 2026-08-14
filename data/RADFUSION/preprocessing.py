@@ -74,7 +74,7 @@ def preprocessing(slice_limit, checkpoint):
     print("Starting preprocessing...")
     scratch_dir = Path("/scratch/jacks.local/mrdonelan/radfusion/multimodalpulmonaryembolismdataset/")
     labels_path = scratch_dir / "Labels.csv"
-    labels = pd.read_csv(labels_path, index_col=0).head(25)
+    labels = pd.read_csv(labels_path, index_col=0)
     
     device = "cuda" if torch.cuda.is_available() else "cpu"
     cnn = torch.load("data/RADFUSION/trained_cnn.pt", map_location=device)
@@ -186,8 +186,10 @@ def preprocessing(slice_limit, checkpoint):
     print(f"EHR Shape: {ehr.shape}")
     print(f"Missing: {ehr.isna().values.any()}")
 
-    train_ind = labels.split == "train"
-    ehr_train = ehr[train_ind]
+    print(labels.idx)
+    train_ids = labels.loc[labels["split"] == "train", "idx"].unique()
+    train_mask = ehr["idx"].isin(train_ids)
+    ehr_train = ehr[train_mask]
 
     print("Performing feature selection...")
     estimator = RidgeClassifier()

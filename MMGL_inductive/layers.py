@@ -1,22 +1,8 @@
-import argparse
-import os
-import pickle
-import random
-import sys
-import tempfile
-import time
-
-import gc
-import matplotlib.cm
-import networkx as nx
 import numpy as np
-import scipy.sparse as spsprs
 import torch
-import torch.autograd
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.optim as optim
-import math
+
 
 class Attention(nn.Module):
     def __init__(self, temperature, attn_dropout=0.1):
@@ -32,16 +18,17 @@ class Attention(nn.Module):
         attn = attn/abs(attn.min())
         attn = self.dropout(F.softmax(F.normalize(attn, dim=-1), dim=-1))
         #attn = self.dropout(F.softmax(attn, dim=-1))
-        # 概率分布xV
+        # probability distribution xV
         output = torch.matmul(attn, v)
 
         return output, attn, v
+
 
 class FeedForwardLayer(nn.Module):
 
     def __init__(self, d_in, d_hid, dropout=0.1):
         super().__init__()
-        # 两个fc层，对最后的512维度进行变换
+        # Two fully connected layers transform the final 512 dimensions.
         self.w_1 = nn.Linear(d_in, d_hid) # position-wise
         self.w_2 = nn.Linear(d_hid, d_in) # position-wise
         self.layer_norm = nn.LayerNorm(d_in, eps=1e-6)
@@ -58,6 +45,7 @@ class FeedForwardLayer(nn.Module):
 
         return x    
     
+
 class VariLengthInputLayer(nn.Module):
     def __init__(self, input_data_dims, d_k, d_v, n_head, dropout):
         super(VariLengthInputLayer, self).__init__()
@@ -86,7 +74,7 @@ class VariLengthInputLayer(nn.Module):
     
     def forward(self, input_data, mask=None):
         """
-        输入的向量是各个模态concatenate起来的
+        The input vector is a concatenation of the various modalities.
         """
         temp_dim = 0
         bs = input_data.size(0)
@@ -113,7 +101,7 @@ class VariLengthInputLayer(nn.Module):
         v = v.view(bs, modal_num, self.n_head, self.d_v)
         q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
         
-        q, attn, residual = self.attention(q, k, v)#注意因为没有同输入相比维度发生变化，因此以v作为残差
+        q, attn, residual = self.attention(q, k, v) # Note that since the dimension has not changed compared to the input, v is used as the residual.
         q = q.transpose(1, 2).contiguous().view(bs, modal_num, -1)
         residual = residual.transpose(1, 2).contiguous().view(bs, modal_num, -1)
         q = self.dropout(self.fc(q))
@@ -121,7 +109,8 @@ class VariLengthInputLayer(nn.Module):
         q = self.layer_norm(q)
         
         return q, attn
-    
+
+
 class EncodeLayer(nn.Module):
     def __init__(self, d_model, d_k, d_v, n_head, dropout):
         super(EncodeLayer, self).__init__()
@@ -152,6 +141,7 @@ class EncodeLayer(nn.Module):
         q += residual
         q = self.layer_norm(q)
         return q, attn
+
 
 class OutputLayer(nn.Module):
     def __init__(self, d_in, d_hidden, n_classes, modal_num, dropout = 0.5):
@@ -196,6 +186,7 @@ class GraphConv(nn.Module):
         #else:
         return output
 
+
 class FusionGate(nn.Module):
     def __init__(self, channel, reduction=1):
         super(FusionGate, self).__init__()
@@ -212,6 +203,7 @@ class FusionGate(nn.Module):
         y = self.avg_pool(x).view(b, c)
         y = self.fc(y).view(b, c, 1)
         return x * y.expand_as(x), y.sum(-2)
+
 
 class GraphAttConv(nn.Module):
     def __init__(self, in_features, out_features, dropout, alpha, concat=True):
@@ -252,4 +244,3 @@ class GraphAttConv(nn.Module):
             all_combinations_matrix = torch.cat([Wh_repeated_in_chunks, Wh_repeated_alternating], dim=1)
 
             return all_combinations_matrix.view(N, N, 2 * self.out_features)
-        

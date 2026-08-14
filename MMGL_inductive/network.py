@@ -1,25 +1,11 @@
-import argparse
-import os
-import pickle
-import random
-import sys
-import tempfile
-import time
-
-import gc
-import matplotlib.cm
-import networkx as nx
 import numpy as np
-import scipy.sparse as spsprs
 import torch
-import torch.autograd
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.optim as optim
-import math
+from torch_geometric.nn import GCNConv
+
 from layers import *
-import dgl
-from dgl.nn import GraphConv
+
 
 
 class VLTransformer(nn.Module):
@@ -159,10 +145,11 @@ class GraphLearn(nn.Module):
             markoff_value = 0
             output = score * mask + markoff_value * (1 - mask)
         
-        if test == True:
-            mask = torch.ones(output.shape)
-            mask[-bs:][-bs:] = torch.zeros((bs, bs))
-            output = output * mask
+        # I don't think this is necessary considering training nodes are filtered out by the sampler during testing.
+        # if test == True:
+        #     mask = torch.ones(output.shape)
+        #     mask[-bs:][-bs:] = torch.zeros((bs, bs))
+        #     output = output * mask
         return output
     
     
@@ -172,12 +159,12 @@ class GraphLearn(nn.Module):
 class GCN(nn.Module):
     def __init__(self, in_feats, h_feats, num_classes, dropout):
         super(GCN, self).__init__()
-        self.conv1 = GraphConv(in_feats, h_feats)
-        self.conv2 = GraphConv(h_feats, num_classes)
+        self.conv1 = GCNConv(in_feats, h_feats)
+        self.conv2 = GCNConv(h_feats, num_classes)
         self.dropout = dropout
 
-    def forward(self, blocks, in_feat):
-        h = F.relu(self.conv1(blocks[0], in_feat))
+    def forward(self, x, edge_index, edge_attr):
+        h = F.relu(self.conv1(x, edge_index, edge_attr))
         h = F.dropout(h, self.dropout, training=self.training)
-        h = F.relu(self.conv2(blocks[1], h))
+        h = F.relu(self.conv2(h, edge_index, edge_attr))
         return F.log_softmax(h, dim=1)    

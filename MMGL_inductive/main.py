@@ -1,27 +1,17 @@
 import argparse
-import os
-import pickle
-import random
 import sys
-import tempfile
-import time
-
+import warnings
 import gc
-import matplotlib.cm
-import networkx as nx
+
 import numpy as np
-import scipy.sparse as spsprs
-from sklearn.model_selection import KFold,StratifiedKFold
+from sklearn.model_selection import StratifiedKFold
 import torch
-import torch.autograd
-import torch.nn as nn
-import torch.nn.functional as fn
-import torch.optim as optim
 import pandas as pd
+import torch_geometric
+
 from network import *
 from utils import *
-from model import *
-import dgl
+from mmgl import *
 
 
 class RedirectStdStreams:
@@ -40,48 +30,11 @@ class RedirectStdStreams:
         self._stderr.flush()
         sys.stdout = self.old_stdout
         sys.stderr = self.old_stderr
-        
-        
-def set_rng_seed(seed):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.benchmark = False
-    torch.backends.cudnn.deterministic = True
-    dgl.seed(seed)
-    dgl.random.seed(seed)
-    
-    
-def sen(con_mat,n):#n为分类数
-    
-    sen = []
-    for i in range(n):
-        tp = con_mat[i][i]
-        fn = np.sum(con_mat[i,:]) - tp
-        sen1 = tp / (tp + fn)
-        sen.append(sen1)
-        
-    return sen
-
-def spe(con_mat,n):
-    
-    spe = []
-    for i in range(n):
-        number = np.sum(con_mat[:,:])
-        tp = con_mat[i][i]
-        fn = np.sum(con_mat[i,:]) - tp
-        fp = np.sum(con_mat[:,i]) - tp
-        tn = number - tp - fn - fp
-        spe1 = tn / (tn + fp)
-        spe.append(spe1)
-    
-    return spe
     
     
 def train_and_eval(datadir, datname, hyperpm):
-    set_rng_seed(hyperpm.seed)
+    torch_geometric.seed_everything(hyperpm.seed)
+    dev = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     path = datadir + datname + '/'
     modal_feat_dict = np.load(path + 'modal_feat_dict.npy', allow_pickle=True).item()
     data = pd.read_csv(path + 'processed_standard_data.csv').values
@@ -92,62 +45,99 @@ def train_and_eval(datadir, datname, hyperpm):
     elif datname == 'ABIDE':
         hyperpm.nclass = 2
         hyperpm.nmodal = 4
-    #np.random.shuffle(data)
-    
-    use_cuda = torch.cuda.is_available()
-    dev = torch.device('cuda' if use_cuda else 'cpu')
+
     input_data_dims = []
     for i in modal_feat_dict.keys():
         input_data_dims.append(len(modal_feat_dict[i]))
     print('Modal dims ', input_data_dims)
     input_data = data[:,:-1]
     label = data[:,-1]-1
-    skf = StratifiedKFold(n_splits=10, random_state=hyperpm.seed, shuffle=True)
-    set_rng_seed(hyperpm.seed)
+    cv = StratifiedKFold(n_splits=10, random_state=hyperpm.seed, shuffle=True)
     val_acc, tst_acc, tst_auc = [], [], []
-    shared_acc_list, shared_auc_list = [], []
-    sp_acc_list, sp_auc_list = [], []
-    sens = []
-    clk = 0
-    for train_index, test_index in skf.split(input_data, label):
-        clk += 1
-        agent = EvalHelper(input_data_dims, input_data, label, hyperpm, train_index, test_index)
-        tm = time.time()
-        best_val_acc, wait_cnt = 0.0, 0
-        model_sav = tempfile.TemporaryFile()
-        for t in range(hyperpm.nepoch):
-            print('%3d/%d' % (t, hyperpm.nepoch), end=' ')
-            agent.run_epoch(mode = hyperpm.mode, end=' ')
-            _, cur_val_acc = agent.print_trn_acc(hyperpm.mode)
-            if cur_val_acc > best_val_acc:
-                wait_cnt = 0
-                best_val_acc = cur_val_acc
-                model_sav.close()
-                model_sav = tempfile.TemporaryFile()
-                dict_list = [agent.ModalFusion.state_dict(),
-                             agent.GraphConstruct.state_dict(),
-                             agent.MessagePassing.state_dict()]
-                torch.save(dict_list, model_sav)
-            else:
-                wait_cnt += 1
-                if wait_cnt > hyperpm.early:
-                    break
-        print("time: %.4f sec." % (time.time() - tm))
-        model_sav.seek(0)
-        dict_list = torch.load(model_sav)
-        agent.ModalFusion.load_state_dict(dict_list[0])
-        agent.GraphConstruct.load_state_dict(dict_list[1])
-        agent.MessagePassing.load_state_dict(dict_list[2])
+    for fold, (train_index, test_index) in enumerate(cv.split(X=input_data, y=label)):
+        mmgl = MMGL(input_data_dims=input_data_dims,
+                    hyperpm=hyperpm,
+                    device=dev)
+        mmgl.fit(input_data, label, train_index, test_index, verbose=True)
+        log_test_prob = mmgl.predict_class_prob(data[test_index])
+        test_labels = np.array(label[test_index])
+        test_prob = np.exp(np.array(log_test_prob))
+        test_pred = np.where(test_prob > 0.5, 1, 0)
+        cur_test_acc = np.mean((np.array(test_pred) == np.array(test_labels)))
+        cur_test_auc = roc_auc_score(test_labels, test_prob)
+        #fpr, tpr, cutoff = get_balanced_cutoff(test_labels, test_prob)
 
-        val_acc.append(best_val_acc)
-        cur_tst_acc, cur_tst_auc = agent.print_tst_acc(hyperpm.mode)
-        
-        tst_acc.append(cur_tst_acc)
-        tst_auc.append(cur_tst_auc)
-        if np.array(tst_acc).mean() < 0.6 and clk == 5:
+        print(f"Current Test Acc: {cur_test_acc:.4f} | Current Test AUC: {cur_test_auc:.4f}")
+       # print(f"FPR: {fpr} | TPR: {tpr} | Cutoff: {cutoff}")
+
+        tst_acc.append(cur_test_acc)
+        tst_auc.append(cur_test_auc)
+        if np.array(tst_acc).mean() < 0.6 and fold == 5:
             break
-    return np.array(val_acc).mean(), np.array(tst_acc).mean(), np.array(tst_acc).std(), np.array(tst_auc).mean(), np.array(tst_auc).std()
+    
+    print(f"Mean Test Acc: {np.array(tst_acc).mean():.4f} | Mean Test AUC: {np.array(tst_auc).mean():.4f}")
+    print(f"Test Acc Std.: {np.array(tst_acc).std():.4f} | Test AUC Std.: {np.array(tst_auc).std():.4f}")
+    
+    return mmgl
 
+def train_eval_radfusion(datadir, datname, hyperpm):
+    torch_geometric.seed_everything(hyperpm.seed)
+    dev = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    path = datadir + datname + '/'
+    modal_feat_dict = np.load(path + 'modal_feat_dict.npy', allow_pickle=True).item()
+    data = pd.read_csv(path + 'processed_standard_data.csv').values
+
+    slice_level_idx = np.load(path + 'slice_level_idx.npy')
+    slice_level_split = np.load(path + 'slice_level_split.npy')
+    print('data shape: ', data.shape)
+
+    hyperpm.nclass = 2
+    hyperpm.nmodal = 2
+
+    input_data_dims = []
+    for i in modal_feat_dict.keys():
+        input_data_dims.append(len(modal_feat_dict[i]))
+    print('Modal dims ', input_data_dims)
+    input_data = data[:,:-1]
+    label = data[:,-1]-1
+    
+    train_mask = slice_level_split == "train"
+    val_mask = slice_level_split == "val"
+    test_mask = slice_level_split == "test"
+
+    train_index = np.array(range(data.shape[0]))[train_mask]
+    val_index = np.array(range(data.shape[0]))[val_mask]
+    test_index = np.array(range(data.shape[0]))[test_mask]
+
+    mmgl = MMGL(input_data_dims=input_data_dims,
+                hyperpm=hyperpm,
+                device=dev)
+    mmgl.fit(input_data, label, train_index, val_index, verbose=True)
+    log_test_prob = mmgl.predict_class_prob(data[test_index])
+    test_labels = np.array(label[test_index])
+    test_prob = np.exp(np.array(log_test_prob))
+    fpr, tpr, cutoff = get_balanced_cutoff(test_labels, test_prob)
+    test_pred = np.where(test_prob > cutoff, 1, 0)
+    test_acc = np.mean((np.array(test_pred) == np.array(test_labels)))
+    test_auc = roc_auc_score(test_labels, test_prob)
+
+    print(f"FPR: {fpr:.4f} | TPR: {tpr:.4f} | Cutoff: {cutoff:.4f}")
+    print(f"Balanced Cutoff Test Acc: {test_acc:.4f} | Test AUC: {test_auc:.4f}")
+
+    print(f"\nShape of test_prob: {test_prob.shape} | Shape of slice_level_idx: {slice_level_idx[test_index].shape}")
+    to_group = pd.DataFrame({"prob": test_prob, "idx": slice_level_idx[test_index], "label": test_labels})
+    grouped_prob = to_group.groupby(["idx"])["prob"].mean()
+    grouped_labels = to_group.groupby(["idx"])["label"].mean()
+    g_fpr, g_tpr, grouped_cutoff = get_balanced_cutoff(grouped_labels, grouped_prob)
+    grouped_pred = np.where(grouped_prob > grouped_cutoff, 1, 0)
+    grouped_acc = np.mean((np.array(grouped_pred) == np.array(grouped_labels)))
+    grouped_auc = roc_auc_score(grouped_labels, grouped_prob)
+
+    print("\n Results After Regrouping to the Image Level:")
+    print(f"Grouped: FPR: {g_fpr:.4f} | TPR {g_tpr:.4f} | Cutoff: {grouped_cutoff:.4f}")
+    print(f"Grouped Balanced Cutoff Test Acc: {grouped_acc:.4f} | Grouped Test AUC: {grouped_auc:.4f}")
+
+    return mmgl
 
 def main(args_str=None):
     assert float(torch.__version__[:3]) + 1e-3 >= 0.4
@@ -204,14 +194,16 @@ def main(args_str=None):
         args = parser.parse_args(args_str.split())
     with RedirectStdStreams(stdout=sys.stderr):
         print('GC_mode:', args.GC_mode, 'MF_mode:', args.MF_mode)
-        val_acc, tst_acc, tst_acc_std, tst_auc, tst_auc_std = train_and_eval(args.datadir, args.datname, args)
-        print('val=%.2f%% tst_acc=%.2f%% tst_auc=%.2f%%' % (val_acc * 100, tst_acc * 100, tst_auc * 100))
-        print('tst_acc_std=%.4f tst_auc_std=%.4f' % (tst_acc_std, tst_auc_std))
-    return val_acc, tst_acc
+        if args.datname == "RADFUSION":
+            mmgl = train_eval_radfusion(args.datadir, args.datname, args)
+        else:
+            mmgl = train_and_eval(args.datadir, args.datname, args)
 
 
 if __name__ == '__main__':
-    print(str(main()))
+    # Suppress a pointless warning regarding not enabling CPU affinity, which does nothing for num_workers=0
+    warnings.filterwarnings('ignore', message='.*Dataloader CPU affinity opt is not enabled.*')
+    main()
     for _ in range(5):
         gc.collect()
         torch.cuda.empty_cache()
